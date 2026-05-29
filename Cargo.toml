@@ -1,0 +1,16 @@
+# Standalone sovereign audio codec crate (carved out of the sanguine repo).
+# The empty [workspace] table keeps it self-contained if ever nested under
+# another workspace, so it always builds on its own.
+[workspace]
+
+[package]
+name = "transcode"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "transcode"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
