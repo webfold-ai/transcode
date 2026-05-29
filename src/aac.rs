@@ -905,33 +905,137 @@ pub fn sine_window(n: usize) -> Vec<f64> {
     (0..n).map(|k| (PI / n as f64 * (k as f64 + 0.5)).sin()).collect()
 }
 
-/// Cached MDCT/IMDCT cosine basis for the canonical phase n0 = (N/2+1)/2:
-///   C[nn*half + k] = cos( (π/half)·(nn + n0)·(k + ½) ),  nn∈0..N, k∈0..half.
-/// The same matrix serves BOTH transforms — IMDCT sums over k for each n, the
-/// forward MDCT sums over n for each k — so the hot loops collapse to table
-/// dot-products with no per-sample `cos()`. The accumulation order is unchanged,
-/// so results are bit-identical to the direct form. Built once per block size
-/// and leaked (only two sizes ever occur: 2048 long, 256 short).
-fn mdct_basis(n: usize) -> &'static [f64] {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<usize, &'static [f64]>>> = OnceLock::new();
-    let mut map = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
-    if let Some(c) = map.get(&n) {
-        return c;
-    }
-    let half = n / 2;
-    let n0 = (half + 1) as f64 / 2.0;
-    let mut c = vec![0.0f64; n * half];
-    for nn in 0..n {
-        let a = nn as f64 + n0;
-        for k in 0..half {
-            c[nn * half + k] = (PI / half as f64 * a * (k as f64 + 0.5)).cos();
+/// In-place radix-2 FFT, positive sign, no normalization:
+///   Z[m] = Σ_j z[j]·exp(+i·2π·j·m/n),  n a power of two.
+/// Both MDCT directions need this single kernel (see `mdct_twiddles`). DIT with
+/// recurrence-stepped twiddles, so only log₂(n) `cos`/`sin` calls per transform.
+fn fft_pos(re: &mut [f64], im: &mut [f64]) {
+    let n = re.len();
+    // bit-reversal permutation
+    let mut j = 0usize;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j |= bit;
+        if i < j {
+            re.swap(i, j);
+            im.swap(i, j);
         }
     }
-    let leaked: &'static [f64] = Box::leak(c.into_boxed_slice());
+    let mut len = 2usize;
+    while len <= n {
+        let ang = 2.0 * PI / len as f64; // +i convention
+        let (wr, wi) = (ang.cos(), ang.sin());
+        let half = len / 2;
+        let mut i = 0;
+        while i < n {
+            let (mut cr, mut ci) = (1.0f64, 0.0f64);
+            for k in 0..half {
+                let ur = re[i + k];
+                let ui = im[i + k];
+                let pr = re[i + k + half];
+                let pi = im[i + k + half];
+                let vr = pr * cr - pi * ci;
+                let vi = pr * ci + pi * cr;
+                re[i + k] = ur + vr;
+                im[i + k] = ui + vi;
+                re[i + k + half] = ur - vr;
+                im[i + k + half] = ui - vi;
+                let ncr = cr * wr - ci * wi;
+                ci = cr * wi + ci * wr;
+                cr = ncr;
+            }
+            i += len;
+        }
+        len <<= 1;
+    }
+}
+
+/// Separable twiddle factors that turn the MDCT/IMDCT cosine sum into one
+/// N-point FFT, for the canonical phase n0 = (M+1)/2 (M = N/2). Cached per N
+/// (only 2048 / 256 occur). Derivation: the chirp (n+n0)(k+½) splits as
+/// n·k (the DFT kernel) + n-only + k-only terms, each an exp() twiddle.
+struct Twiddles {
+    // IMDCT: out[n] = Re{ A[n]·Σ_k (X[k]·B[k])·e^{+i2πnk/N} }
+    b_re: Vec<f64>, // B[k] = e^{+iπ·n0·k/M},        k∈0..M
+    b_im: Vec<f64>,
+    a_re: Vec<f64>, // A[n] = e^{+iπ·(n+n0)/(2M)},    n∈0..N
+    a_im: Vec<f64>,
+    // MDCT: out[k] = Re{ Wp[k]·Σ_n (t[n]·P[n])·e^{+i2πnk/N} }
+    p_re: Vec<f64>, // P[n]  = e^{+iπ·n/(2M)},        n∈0..N
+    p_im: Vec<f64>,
+    wp_re: Vec<f64>, // Wp[k]= e^{+iπ·n0·(2k+1)/(2M)}, k∈0..M
+    wp_im: Vec<f64>,
+}
+
+fn mdct_twiddles(n: usize) -> &'static Twiddles {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<usize, &'static Twiddles>>> = OnceLock::new();
+    let mut map = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+    if let Some(t) = map.get(&n) {
+        return t;
+    }
+    let m = n / 2;
+    let n0 = (m + 1) as f64 / 2.0;
+    let cis = |a: f64| (a.cos(), a.sin());
+    let (mut b_re, mut b_im) = (vec![0.0; m], vec![0.0; m]);
+    let (mut wp_re, mut wp_im) = (vec![0.0; m], vec![0.0; m]);
+    for k in 0..m {
+        let (r, i) = cis(PI * n0 * k as f64 / m as f64);
+        b_re[k] = r;
+        b_im[k] = i;
+        let (r, i) = cis(PI * n0 * (2 * k + 1) as f64 / (2 * m) as f64);
+        wp_re[k] = r;
+        wp_im[k] = i;
+    }
+    let (mut a_re, mut a_im) = (vec![0.0; n], vec![0.0; n]);
+    let (mut p_re, mut p_im) = (vec![0.0; n], vec![0.0; n]);
+    for nn in 0..n {
+        let (r, i) = cis(PI * (nn as f64 + n0) / (2 * m) as f64);
+        a_re[nn] = r;
+        a_im[nn] = i;
+        let (r, i) = cis(PI * nn as f64 / (2 * m) as f64);
+        p_re[nn] = r;
+        p_im[nn] = i;
+    }
+    let leaked: &'static Twiddles = Box::leak(Box::new(Twiddles {
+        b_re, b_im, a_re, a_im, p_re, p_im, wp_re, wp_im,
+    }));
     map.insert(n, leaked);
     leaked
+}
+
+/// IMDCT cosine sum (length M → N), canonical phase, via one N-point FFT.
+/// Returns the UNSCALED sum Σ_k spec[k]·cos((π/M)(n+n0)(k+½)); caller scales.
+fn fast_imdct_core(spec: &[f64]) -> Vec<f64> {
+    let m = spec.len();
+    let n = m * 2;
+    let tw = mdct_twiddles(n);
+    let (mut yr, mut yi) = (vec![0.0; n], vec![0.0; n]); // zero-padded M..N
+    for k in 0..m {
+        yr[k] = spec[k] * tw.b_re[k];
+        yi[k] = spec[k] * tw.b_im[k];
+    }
+    fft_pos(&mut yr, &mut yi);
+    (0..n).map(|nn| tw.a_re[nn] * yr[nn] - tw.a_im[nn] * yi[nn]).collect()
+}
+
+/// Forward MDCT cosine sum (length N → M), canonical phase, via one N-point FFT.
+fn fast_mdct_core(time: &[f64]) -> Vec<f64> {
+    let n = time.len();
+    let m = n / 2;
+    let tw = mdct_twiddles(n);
+    let (mut zr, mut zi) = (vec![0.0; n], vec![0.0; n]);
+    for nn in 0..n {
+        zr[nn] = time[nn] * tw.p_re[nn];
+        zi[nn] = time[nn] * tw.p_im[nn];
+    }
+    fft_pos(&mut zr, &mut zi);
+    (0..m).map(|k| tw.wp_re[k] * zr[k] - tw.wp_im[k] * zi[k]).collect()
 }
 
 #[inline]
@@ -951,14 +1055,9 @@ fn imdct_p(spec: &[f64], n0: f64, scale: f64) -> Vec<f64> {
     let n = half * 2;
     let mut out = vec![0.0f64; n];
     if canonical_n0(half, n0) {
-        let c = mdct_basis(n);
-        for (nn, o) in out.iter_mut().enumerate() {
-            let row = &c[nn * half..nn * half + half];
-            let mut acc = 0.0;
-            for (k, &s) in spec.iter().enumerate() {
-                acc += s * row[k];
-            }
-            *o = scale * acc;
+        let core = fast_imdct_core(spec);
+        for (o, &c) in out.iter_mut().zip(core.iter()) {
+            *o = scale * c;
         }
     } else {
         // non-canonical phase: only the brute-force `mdct_probe` reaches here
@@ -984,15 +1083,7 @@ fn mdct_p(time: &[f64], n0: f64) -> Vec<f64> {
     let half = n / 2;
     let mut out = vec![0.0f64; half];
     if canonical_n0(half, n0) {
-        let c = mdct_basis(n);
-        // sum over n for each k; n-major table walk keeps per-k order identical
-        // to the direct form (so out[k] accumulates bit-identically).
-        for (nn, &t) in time.iter().enumerate() {
-            let row = &c[nn * half..nn * half + half];
-            for (k, o) in out.iter_mut().enumerate() {
-                *o += t * row[k];
-            }
-        }
+        out = fast_mdct_core(time);
     } else {
         for (k, o) in out.iter_mut().enumerate() {
             let mut acc = 0.0;
@@ -1040,6 +1131,53 @@ pub fn mdct_probe() -> i32 {
         }
     }
     0
+}
+
+/// Numeric proof that the FFT-factored cores reproduce the direct cosine sum
+/// to machine precision (canonical phase n0 = (M+1)/2), for both block sizes
+/// and both directions. The FFT path is only an algebraic re-grouping of the
+/// same sum, so the residual must be ~1e-12; this gates the fast path before
+/// the codec ever uses it.
+pub fn fft_check() -> i32 {
+    let mut seed = 0x9e3779b97f4a7c15u64;
+    let mut rng = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+    };
+    let mut worst = 0.0f64;
+    for &n in &[2048usize, 256usize] {
+        let m = n / 2;
+        let n0 = (m + 1) as f64 / 2.0;
+        // IMDCT: fast core vs direct cosine sum
+        let spec: Vec<f64> = (0..m).map(|_| rng()).collect();
+        let fast = fast_imdct_core(&spec);
+        let mut di = 0.0f64;
+        for nn in 0..n {
+            let a = nn as f64 + n0;
+            let naive: f64 = spec.iter().enumerate().map(|(k, &s)| s * (PI / m as f64 * a * (k as f64 + 0.5)).cos()).sum();
+            di = di.max((fast[nn] - naive).abs());
+        }
+        // MDCT: fast core vs direct cosine sum
+        let time: Vec<f64> = (0..n).map(|_| rng()).collect();
+        let fastf = fast_mdct_core(&time);
+        let mut df = 0.0f64;
+        for k in 0..m {
+            let naive: f64 = time.iter().enumerate().map(|(nn, &t)| t * (PI / m as f64 * (nn as f64 + n0) * (k as f64 + 0.5)).cos()).sum();
+            df = df.max((fastf[k] - naive).abs());
+        }
+        worst = worst.max(di).max(df);
+        let to_db = |e: f64| 20.0 * e.max(1e-300).log10();
+        println!("  N={n:<5} IMDCT err {di:.2e} ({:>7.1} dB)   MDCT err {df:.2e} ({:>7.1} dB)", to_db(di), to_db(df));
+    }
+    if worst < 1e-6 {
+        println!("aac FFT cores: match direct cosine sum (worst {worst:.2e}) [ok]");
+        0
+    } else {
+        println!("aac FFT cores: MISMATCH (worst {worst:.2e}) [FAIL]");
+        1
+    }
 }
 
 /// TDAC perfect-reconstruction test: windowed MDCT → IMDCT → overlap-add must

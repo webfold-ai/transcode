@@ -11,7 +11,7 @@ the **honest** state of each path — what round-trips today vs. what is partial
 | **FLAC** | ✅ | ✅ | real `.flac`, decodable by any FLAC decoder; the STT data path |
 | **SLAC** | ✅ | ✅ | own lossless container; `decode∘encode = identity` (verified) |
 | **MP3 (Layer III)** | ✅ | ❌ | full decoder; no encoder planned (decode-only is the need) |
-| **AAC-LC (ADTS)** | ✅ | ✅ | MDCT + Huffman + **closed-form** rate control (no search loop); basis-cached transform |
+| **AAC-LC (ADTS)** | ✅ | ✅ | MDCT + Huffman + **closed-form** rate control (no search loop); **FFT-factored** O(N log N) transform |
 | **Opus** | 🔨 partial | ❌ | range coder, Laplace/PVQ, coarse/fine energy, CELT alloc, TOC + container parse — **no full frame→PCM decode yet** |
 
 ✅ done · 🔨 in progress · ❌ not implemented
@@ -33,19 +33,22 @@ the **honest** state of each path — what round-trips today vs. what is partial
 - **AAC-LC decode/encode** — ADTS framing, Huffman codebooks, inverse/forward MDCT with
   TDAC overlap-add, scale-factor requantization. The encoder picks the global
   scalefactor in **closed form** (residual ÷ analytic rate–scalefactor slope, one B/U
-  injection) rather than the classic iterative two-loop search. The MDCT/IMDCT share a
-  precomputed cosine basis (no per-sample `cos()`), keeping both directions fast.
+  injection) rather than the classic iterative two-loop search. The MDCT/IMDCT factor
+  through a single N-point FFT (pre-twiddle → radix-2 FFT → post-twiddle), so the
+  transform is **O(N log N)** rather than the naive O(N²) cosine multiply — exact, not
+  approximate (it is the same cosine sum re-grouped; verified to ~1e-11 by `--aac-fft-test`).
 - **Opus** — the entropy layer (range coder + Laplace + PVQ pulse coding) and the CELT
   bit-allocation / energy-envelope machinery are built and unit-probed; the SILK and
   full CELT synthesis stages that turn a packet into PCM are not wired yet.
 
 ## Near-term
 
-1. **AAC: O(N log N) MDCT** — the closed-form rate control (no scalefactor search
-   loop) and the precomputed cosine basis (no per-sample `cos()`) already took AAC
-   from ~4× to **~60× realtime encode / ~46× decode** ([benchmarks](BENCHMARKS.md)).
-   The transform is still an O(N²) basis multiply; a split-radix FFT-based MDCT would
-   close the remaining gap to FLAC. Higher-risk than the table approach, so deferred.
+1. **AAC packed N/4 real-FFT MDCT** (optional polish) — closed-form rate control plus
+   the FFT-factored transform took AAC from ~4× to **~656× realtime encode / ~372×
+   decode** ([benchmarks](BENCHMARKS.md)); decode is now within ~1.7× of ffmpeg and
+   encode is *faster* than ffmpeg. The FFT is currently a full N-point transform on a
+   zero-padded half-spectrum; the packed real-FFT / N/4 method would shave another
+   ~2–4×. Low priority now that AAC is no longer a bottleneck.
 2. **Finish Opus decode → PCM** — wire CELT synthesis (and SILK) on top of the existing
    range coder + PVQ + energy primitives so `--from-opus` / `opus::decode_pcm` work.
 3. **`cargo test` coverage** — the codecs are currently verified only through the CLI

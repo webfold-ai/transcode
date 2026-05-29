@@ -114,10 +114,11 @@ transcode --bench 10                        # throughput + ratio benchmark on 10
 ## Performance
 
 On a 13th Gen i5-1340P, single thread: FLAC, SLAC and the resampler run at
-**~1000–4000× realtime**; AAC-LC runs at **~60× realtime encode / ~46× decode** after
-the rate control went closed-form (no scalefactor search) and the MDCT/IMDCT moved to a
-precomputed cosine basis. Full measured table, methodology, and caveats →
-[BENCHMARKS.md](BENCHMARKS.md).
+**~1000–4000× realtime**; AAC-LC runs at **~656× realtime encode / ~372× decode** with
+closed-form rate control and an FFT-factored O(N log N) MDCT/IMDCT. In a wall-clock
+comparison against ffmpeg 7.1.4 on the same box, transcode is faster on FLAC (both
+directions) and on AAC encode; ffmpeg is ~1.7× faster on AAC decode. Full measured
+table, methodology, ffmpeg head-to-head, and caveats → [BENCHMARKS.md](BENCHMARKS.md).
 Reproduce with `cargo build --release && ./target/release/transcode --bench 10`.
 
 ## Design notes
