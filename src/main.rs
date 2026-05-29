@@ -507,6 +507,9 @@ fn main() {
     if args.len() == 2 && args[1] == "--aac-fft-test" {
         std::process::exit(aac::fft_check());
     }
+    if args.len() == 2 && args[1] == "--aac-imdct-bench" {
+        std::process::exit(aac::imdct_bench());
+    }
     if args.len() == 2 && args[1] == "--aac-huff-test" {
         std::process::exit(aac::huffman_selftest());
     }

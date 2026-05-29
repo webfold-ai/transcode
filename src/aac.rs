@@ -1180,6 +1180,33 @@ pub fn fft_check() -> i32 {
     }
 }
 
+/// Micro-bench: pure IMDCT cost vs full per-frame decode budget. Answers
+/// "is the transform actually the bottleneck?" before changing it.
+pub fn imdct_bench() -> i32 {
+    use std::time::Instant;
+    let spec: Vec<f64> = (0..1024).map(|k| (k as f64 * 0.0173).sin()).collect();
+    // warm
+    for _ in 0..1000 { let _ = fast_imdct_core(&spec); }
+    let iters = 100_000usize;
+    let t0 = Instant::now();
+    let mut sink = 0.0f64;
+    for _ in 0..iters {
+        let out = fast_imdct_core(&spec);
+        sink += out[0]; // prevent dead-code elim
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    let us = dt * 1e6 / iters as f64;
+    let mhz = (1024.0 / us) as i64; // Msamp/s of spec consumed
+    // For 10s @16k decode budget context (1024-hop): 160000/1024 ≈ 156 frames.
+    let frames_10s = 156.0;
+    let imdct_share_ms = us * frames_10s / 1000.0;
+    println!("fast_imdct_core(spec[1024]): {us:.2} µs/call  ({mhz} Msamp/s)  [sink={sink:.3e}]");
+    println!("for 10s @16k mono (156 long frames): IMDCT alone = {imdct_share_ms:.2} ms");
+    println!("(compare to measured full decode 26.89 ms → IMDCT is ~{:.0}% of decode)",
+             100.0 * imdct_share_ms / 26.89);
+    0
+}
+
 /// TDAC perfect-reconstruction test: windowed MDCT → IMDCT → overlap-add must
 /// reconstruct the input in the steady state.  Proves the IMDCT + window math
 /// (both sine and KBD, long N=2048 and short N=256) the same way mp3.rs proved
@@ -1244,9 +1271,25 @@ pub fn tdac_test() -> i32 {
 // Audio reconstruction: dequant → M/S stereo → IMDCT/window/overlap-add → PCM
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Inverse quantization table: |q|^(4/3) for q ∈ [0, 8191] (the AAC quantizer
+/// max). 8192 × f64 = 64 KiB, built once. Each decoded spectral line is an
+/// integer, so the exponent collapses to one indexed load — no per-line `powf`.
+fn dequant_table() -> &'static [f64; 8192] {
+    use std::sync::OnceLock;
+    static T: OnceLock<[f64; 8192]> = OnceLock::new();
+    T.get_or_init(|| {
+        let mut t = [0.0f64; 8192];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = (i as f64).powf(4.0 / 3.0);
+        }
+        t
+    })
+}
+
 /// Inverse quantization of one coefficient: sign(q)·|q|^(4/3).
+#[inline]
 fn dequant(q: i32) -> f64 {
-    let a = (q.unsigned_abs() as f64).powf(4.0 / 3.0);
+    let a = dequant_table()[(q.unsigned_abs() as usize).min(8191)];
     if q < 0 { -a } else { a }
 }
 
