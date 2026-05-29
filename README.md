@@ -13,11 +13,16 @@ into PCM for log-mel feature extraction).
 
 | Capability | Detail |
 |---|---|
-| **Decode** | FLAC, MP3 (Layer III), AAC-LC (ADTS), Opus, RIFF WAV |
+| **Decode** | FLAC, MP3 (Layer III), AAC-LC (ADTS), RIFF WAV — Opus is partial (see below) |
 | **Encode** | FLAC, AAC-LC, RIFF WAV, SLAC (lossless container) |
 | **Resample** | polyphase rational L/M, fixed-point Q15 windowed-sinc lowpass |
 | **Bit depth** | 8 / 16 / 24 / 32-bit int, 32-bit float — any → any |
 | **Channels** | mono ↔ stereo (down-mix average, up-mix duplicate) |
+
+**Per-format status, what each piece means, and the roadmap → [ROADMAP.md](ROADMAP.md).**
+Short version: WAV, FLAC, SLAC and the resampler are fully round-tripping; MP3 decodes
+(no encoder); AAC-LC round-trips but is slow; **Opus is entropy-layer + container
+parsing only — no full frame→PCM decode yet.**
 
 All samples are carried internally as canonical 32-bit signed full-scale fixed-point
 (`i32`, ±2³¹); every depth maps in by a shift, so resampling and mixing happen at full
@@ -101,9 +106,17 @@ Generate a test tone, and run the self-tests:
 transcode --gen tone.wav 16000 1000 0.5   # 16 kHz, 1 kHz tone, 0.5 s
 transcode --selftest                       # resample + bit-depth round-trip + channel remap
 transcode --codec-selftest                 # SLAC encode/decode round-trip
+transcode --bench 10                        # throughput + ratio benchmark on 10 s of audio
 ```
 
 (Per-codec verification probes also exist: `--mp3-*`, `--aac-*`, `--opus-*`.)
+
+## Performance
+
+On a 13th Gen i5-1340P, single thread: FLAC, SLAC and the resampler run at
+**~1000–4000× realtime**; AAC-LC is correct but ~600× slower (an optimization target).
+Full measured table, methodology, and caveats → [BENCHMARKS.md](BENCHMARKS.md).
+Reproduce with `cargo build --release && ./target/release/transcode --bench 10`.
 
 ## Design notes
 

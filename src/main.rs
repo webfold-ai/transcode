@@ -410,6 +410,68 @@ fn selftest() -> i32 {
     if fails == 0 { println!("\nselftest: all passed"); 0 } else { println!("\nselftest: {fails} FAILED"); 1 }
 }
 
+// ─── benchmark: throughput + compression ratio (std-only, reproducible) ────────
+
+fn bench(secs: f64) -> i32 {
+    use std::time::Instant;
+    let rate = 16000u32;
+    let src = synth_sine(rate, 440.0, secs, 0.4); // canonical i32, fmt I16, mono
+    let n = src.samples.len();
+    let audio_s = n as f64 / rate as f64;
+    let raw_bytes = n * bytes_per(Fmt::I16);
+    println!("bench: {audio_s:.1}s mono @ {rate} Hz = {n} samples ({} KiB raw i16)", raw_bytes / 1024);
+    println!("       synthetic 440 Hz tone — compression ratios are best-case (pure tone);");
+    println!("       throughput is representative. real speech/music ratios will be lower.\n");
+
+    let report = |label: &str, elapsed: f64, enc_bytes: Option<usize>| {
+        let xrt = audio_s / elapsed;
+        let msps = n as f64 / elapsed / 1e6;
+        match enc_bytes {
+            Some(b) => {
+                let ratio = raw_bytes as f64 / b as f64;
+                println!("  {label:<20} {:>8.2} ms  {xrt:>8.0}x realtime  {msps:>6.1} Msamp/s  ratio {ratio:>5.2}x ({} KiB)", elapsed * 1e3, b / 1024);
+            }
+            None => println!("  {label:<20} {:>8.2} ms  {xrt:>8.0}x realtime  {msps:>6.1} Msamp/s", elapsed * 1e3),
+        }
+    };
+
+    let t = Instant::now();
+    let _ = transcode(&src, 8000, 1, Fmt::I16);
+    report("resample 16k->8k", t.elapsed().as_secs_f64(), None);
+
+    let native_i32: Vec<i32> = src.samples.iter().map(|&v| v >> 16).collect();
+    let t = Instant::now();
+    let flac_bytes = flac::encode(&native_i32, rate, 1, 16);
+    report("FLAC encode", t.elapsed().as_secs_f64(), Some(flac_bytes.len()));
+    let t = Instant::now();
+    match flac::decode(&flac_bytes) {
+        Ok(_) => report("FLAC decode", t.elapsed().as_secs_f64(), None),
+        Err(e) => println!("  FLAC decode        FAILED: {e}"),
+    }
+
+    let pcm_i16: Vec<i16> = src.samples.iter().map(|&v| (v >> 16) as i16).collect();
+    let t = Instant::now();
+    let aac_bytes = aac::encode_pcm(&pcm_i16, rate, 1, 128);
+    report("AAC-LC encode 128k", t.elapsed().as_secs_f64(), Some(aac_bytes.len()));
+    let t = Instant::now();
+    match aac::decode_pcm(&aac_bytes) {
+        Ok(_) => report("AAC-LC decode", t.elapsed().as_secs_f64(), None),
+        Err(e) => println!("  AAC-LC decode      FAILED: {e}"),
+    }
+
+    let t = Instant::now();
+    let slac_bytes = codec::encode(&src.samples, rate, 1, Fmt::I16.code(), Fmt::I16.shift());
+    report("SLAC encode", t.elapsed().as_secs_f64(), Some(slac_bytes.len()));
+    let t = Instant::now();
+    match codec::decode(&slac_bytes) {
+        Ok(_) => report("SLAC decode", t.elapsed().as_secs_f64(), None),
+        Err(e) => println!("  SLAC decode        FAILED: {e}"),
+    }
+
+    println!("\n(MP3 + Opus decode need a real encoded file — this crate ships no MP3/Opus encoder.)");
+    0
+}
+
 // ─── CLI ───────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -419,6 +481,10 @@ fn main() {
     }
     if args.len() >= 2 && args[1] == "--codec-selftest" {
         std::process::exit(codec::selftest());
+    }
+    if args.len() >= 2 && args[1] == "--bench" {
+        let secs = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(10.0);
+        std::process::exit(bench(secs));
     }
     if args.len() == 4 && args[1] == "--from-mp3" {
         match mp3::decode_pcm(&std::fs::read(&args[2]).unwrap_or_default()) {
