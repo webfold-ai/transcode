@@ -11,7 +11,7 @@ the **honest** state of each path — what round-trips today vs. what is partial
 | **FLAC** | ✅ | ✅ | real `.flac`, decodable by any FLAC decoder; the STT data path |
 | **SLAC** | ✅ | ✅ | own lossless container; `decode∘encode = identity` (verified) |
 | **MP3 (Layer III)** | ✅ | ❌ | full decoder; no encoder planned (decode-only is the need) |
-| **AAC-LC (ADTS)** | ✅ | ✅ | correct but slow (see below); MDCT + Huffman + rate control |
+| **AAC-LC (ADTS)** | ✅ | ✅ | MDCT + Huffman + **closed-form** rate control (no search loop); basis-cached transform |
 | **Opus** | 🔨 partial | ❌ | range coder, Laplace/PVQ, coarse/fine energy, CELT alloc, TOC + container parse — **no full frame→PCM decode yet** |
 
 ✅ done · 🔨 in progress · ❌ not implemented
@@ -31,17 +31,21 @@ the **honest** state of each path — what round-trips today vs. what is partial
 - **MP3 Layer III decode** — Huffman → requantize → reorder → IMDCT → polyphase
   synthesis filterbank; handles MPEG-1/2/2.5, the bit reservoir, and VBR.
 - **AAC-LC decode/encode** — ADTS framing, Huffman codebooks, inverse/forward MDCT with
-  TDAC overlap-add, scale-factor requantization. The encoder runs an iterative
-  rate-control loop to hit a target bitrate.
+  TDAC overlap-add, scale-factor requantization. The encoder picks the global
+  scalefactor in **closed form** (residual ÷ analytic rate–scalefactor slope, one B/U
+  injection) rather than the classic iterative two-loop search. The MDCT/IMDCT share a
+  precomputed cosine basis (no per-sample `cos()`), keeping both directions fast.
 - **Opus** — the entropy layer (range coder + Laplace + PVQ pulse coding) and the CELT
   bit-allocation / energy-envelope machinery are built and unit-probed; the SILK and
   full CELT synthesis stages that turn a packet into PCM are not wired yet.
 
 ## Near-term
 
-1. **Optimize AAC** — it is ~600× slower than FLAC ([benchmarks](BENCHMARKS.md)). The
-   MDCT and the encoder's quantization search are the hot spots; precompute twiddles,
-   cut allocations in the inner loop, and short-circuit the rate-control iterations.
+1. **AAC: O(N log N) MDCT** — the closed-form rate control (no scalefactor search
+   loop) and the precomputed cosine basis (no per-sample `cos()`) already took AAC
+   from ~4× to **~60× realtime encode / ~46× decode** ([benchmarks](BENCHMARKS.md)).
+   The transform is still an O(N²) basis multiply; a split-radix FFT-based MDCT would
+   close the remaining gap to FLAC. Higher-risk than the table approach, so deferred.
 2. **Finish Opus decode → PCM** — wire CELT synthesis (and SILK) on top of the existing
    range coder + PVQ + energy primitives so `--from-opus` / `opus::decode_pcm` work.
 3. **`cargo test` coverage** — the codecs are currently verified only through the CLI

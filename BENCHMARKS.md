@@ -24,8 +24,8 @@ Measured on a **13th Gen Intel Core i5-1340P**, `rustc 1.94.0`, `--release`
 | resample 16k→8k | ~5.8 ms | ~1700× realtime · 27 Msamp/s | — |
 | FLAC encode | ~7.6 ms | ~1300× realtime · 21 Msamp/s | 6.86× |
 | FLAC decode | ~2.9 ms | ~3400× realtime · 55 Msamp/s | — |
-| AAC-LC encode (128 kbps) | ~2670 ms | ~4× realtime · 0.1 Msamp/s | 7.46× |
-| AAC-LC decode | ~2510 ms | ~4× realtime · 0.1 Msamp/s | — |
+| AAC-LC encode (128 kbps) | ~167 ms | ~60× realtime · 1.0 Msamp/s | 7.52× |
+| AAC-LC decode | ~217 ms | ~46× realtime · 0.7 Msamp/s | — |
 | SLAC encode (lossless) | ~3.9 ms | ~2580× realtime · 41 Msamp/s | 6.06× |
 | SLAC decode | ~2.1 ms | ~4750× realtime · 77 Msamp/s | — |
 
@@ -36,11 +36,14 @@ Measured on a **13th Gen Intel Core i5-1340P**, `rustc 1.94.0`, `--release`
 - **FLAC / SLAC / resample are very fast** (hundreds-to-thousands × realtime) — the
   fixed-point integer paths are the design's strong suit, fast enough that codec time
   is negligible next to disk/model time in the STT data pipeline.
-- **AAC-LC is ~600× slower** than FLAC on both encode and decode. The MDCT +
-  iterative rate-control quantization loop (encode) and the inverse filterbank
-  (decode) are the hot spots. AAC is correct but **not yet optimized** — see the
-  [roadmap](ROADMAP.md). For the STT pipeline this does not matter (FLAC is the
-  format in use); it matters only if AAC becomes a throughput path.
+- **AAC-LC is now ~60× realtime (encode) / ~46× (decode)** — up from ~4× before the
+  rate control went **closed-form** (one B÷U scalefactor solve, no bisection search)
+  and the MDCT/IMDCT moved to a **precomputed cosine basis** (no per-sample `cos()` in
+  the hot loop, bit-identical to the naive transform). It is still slower than FLAC
+  because the transform remains an O(N²) basis multiply; a split-radix FFT-based MDCT
+  is the remaining step — see the [roadmap](ROADMAP.md). For the STT pipeline this does
+  not matter (FLAC is the format in use); it matters only if AAC becomes a throughput
+  path.
 
 ## Caveats (read before quoting these)
 

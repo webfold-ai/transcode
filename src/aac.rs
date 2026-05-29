@@ -905,6 +905,40 @@ pub fn sine_window(n: usize) -> Vec<f64> {
     (0..n).map(|k| (PI / n as f64 * (k as f64 + 0.5)).sin()).collect()
 }
 
+/// Cached MDCT/IMDCT cosine basis for the canonical phase n0 = (N/2+1)/2:
+///   C[nn*half + k] = cos( (π/half)·(nn + n0)·(k + ½) ),  nn∈0..N, k∈0..half.
+/// The same matrix serves BOTH transforms — IMDCT sums over k for each n, the
+/// forward MDCT sums over n for each k — so the hot loops collapse to table
+/// dot-products with no per-sample `cos()`. The accumulation order is unchanged,
+/// so results are bit-identical to the direct form. Built once per block size
+/// and leaked (only two sizes ever occur: 2048 long, 256 short).
+fn mdct_basis(n: usize) -> &'static [f64] {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<usize, &'static [f64]>>> = OnceLock::new();
+    let mut map = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+    if let Some(c) = map.get(&n) {
+        return c;
+    }
+    let half = n / 2;
+    let n0 = (half + 1) as f64 / 2.0;
+    let mut c = vec![0.0f64; n * half];
+    for nn in 0..n {
+        let a = nn as f64 + n0;
+        for k in 0..half {
+            c[nn * half + k] = (PI / half as f64 * a * (k as f64 + 0.5)).cos();
+        }
+    }
+    let leaked: &'static [f64] = Box::leak(c.into_boxed_slice());
+    map.insert(n, leaked);
+    leaked
+}
+
+#[inline]
+fn canonical_n0(half: usize, n0: f64) -> bool {
+    (n0 - (half + 1) as f64 / 2.0).abs() < 1e-9
+}
+
 /// IMDCT of `spec` (length N/2) → time domain (length N), spec §4.6.11.2.1.
 /// n0 = (N/2+1)/2, scale = 2/N (the Princen-Bradley TDAC normalization).
 pub fn imdct(spec: &[f64]) -> Vec<f64> {
@@ -916,18 +950,31 @@ fn imdct_p(spec: &[f64], n0: f64, scale: f64) -> Vec<f64> {
     let half = spec.len();
     let n = half * 2;
     let mut out = vec![0.0f64; n];
-    for (nn, o) in out.iter_mut().enumerate() {
-        let a = nn as f64 + n0;
-        let mut acc = 0.0;
-        for (k, &s) in spec.iter().enumerate() {
-            acc += s * (PI / half as f64 * a * (k as f64 + 0.5)).cos();
+    if canonical_n0(half, n0) {
+        let c = mdct_basis(n);
+        for (nn, o) in out.iter_mut().enumerate() {
+            let row = &c[nn * half..nn * half + half];
+            let mut acc = 0.0;
+            for (k, &s) in spec.iter().enumerate() {
+                acc += s * row[k];
+            }
+            *o = scale * acc;
         }
-        *o = scale * acc;
+    } else {
+        // non-canonical phase: only the brute-force `mdct_probe` reaches here
+        for (nn, o) in out.iter_mut().enumerate() {
+            let a = nn as f64 + n0;
+            let mut acc = 0.0;
+            for (k, &s) in spec.iter().enumerate() {
+                acc += s * (PI / half as f64 * a * (k as f64 + 0.5)).cos();
+            }
+            *o = scale * acc;
+        }
     }
     out
 }
 
-/// Forward MDCT (length N → N/2), only used by the TDAC self-test.
+/// Forward MDCT (length N → N/2): the encoder's analysis transform.
 fn mdct(time: &[f64]) -> Vec<f64> {
     mdct_p(time, (time.len() / 2 + 1) as f64 / 2.0)
 }
@@ -936,12 +983,24 @@ fn mdct_p(time: &[f64], n0: f64) -> Vec<f64> {
     let n = time.len();
     let half = n / 2;
     let mut out = vec![0.0f64; half];
-    for (k, o) in out.iter_mut().enumerate() {
-        let mut acc = 0.0;
+    if canonical_n0(half, n0) {
+        let c = mdct_basis(n);
+        // sum over n for each k; n-major table walk keeps per-k order identical
+        // to the direct form (so out[k] accumulates bit-identically).
         for (nn, &t) in time.iter().enumerate() {
-            acc += t * (PI / half as f64 * (nn as f64 + n0) * (k as f64 + 0.5)).cos();
+            let row = &c[nn * half..nn * half + half];
+            for (k, o) in out.iter_mut().enumerate() {
+                *o += t * row[k];
+            }
         }
-        *o = acc;
+    } else {
+        for (k, o) in out.iter_mut().enumerate() {
+            let mut acc = 0.0;
+            for (nn, &t) in time.iter().enumerate() {
+                acc += t * (PI / half as f64 * (nn as f64 + n0) * (k as f64 + 0.5)).cos();
+            }
+            *o = acc;
+        }
     }
     out
 }
@@ -1545,10 +1604,21 @@ fn build_ics(spec: &[f64], swb: &[usize], sf: i32) -> BitWriter {
     w
 }
 
-/// Encode one channel: choose the finest scalefactor that (a) does not clamp the
-/// largest coefficient to the 8191 quantizer ceiling and (b) fits the per-frame
-/// bit budget. `sf_min` is the no-clamp floor (going below it destroys the loud
-/// bins); within `[sf_min, 255]` bits decrease with sf, so bisect for the budget.
+/// Encode one channel by choosing the global scalefactor in **closed form** — no
+/// rate-control search loop (the platonic B/U form of the two-loop encoder).
+///
+/// `sf_min` is the no-clamp floor: below it the loudest line saturates the 8191
+/// quantizer ceiling. Within `[sf_min, 255]` the frame bit count R(sf) decreases
+/// monotonically, and the rate–scalefactor law is analytic: a step of +4 in sf
+/// scales every coefficient magnitude by 2^(−3/4), shaving ≈ ¾ bit off each
+/// non-zero line's codeword. So the slope is closed-form, dR/dsf ≈ −0.1875·N_nz,
+/// and the scalefactor meeting the budget is a single division — residual over
+/// slope — injected directly (x = B/U), not bisected:
+///     sf* = sf_min + ⌈(R(sf_min) − target) / (0.1875·N_nz)⌉
+/// One calibration build at sf_min, then one corrective build at sf*. The ADTS
+/// frame length is a soft budget (no decoder buffer constraint at AAC-LC bitrates
+/// — a frame stays far under the 13-bit length field), so a small model error
+/// only nudges the realised bitrate; it can never produce an invalid stream.
 fn encode_channel(spec: &[f64], swb: &[usize], target_bits: usize) -> BitWriter {
     let maxc = spec.iter().cloned().fold(0.0f64, |a, b| a.max(b.abs()));
     let thresh = 8190.0f64.powf(4.0 / 3.0); // |coef|·2^(-(sf-100)/4) at q≈8191
@@ -1558,16 +1628,17 @@ fn encode_channel(spec: &[f64], swb: &[usize], target_bits: usize) -> BitWriter 
         (100.0 + 4.0 * (maxc / thresh).log2()).ceil() as i32
     }
     .clamp(1, 255);
-    let (mut lo, mut hi) = (sf_min, 255i32);
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        if build_ics(spec, swb, mid).len_bits() <= target_bits {
-            hi = mid;
-        } else {
-            lo = mid + 1;
-        }
+
+    let ics0 = build_ics(spec, swb, sf_min);
+    if ics0.len_bits() <= target_bits {
+        return ics0; // finest allowed sf already fits — nothing to coarsen
     }
-    build_ics(spec, swb, lo)
+    let n_coef = swb[swb.len() - 1];
+    let n_nz = spec[..n_coef].iter().filter(|&&x| quant(x, sf_min) != 0).count();
+    let slope = (0.1875 * n_nz as f64).max(1e-6); // bits shed per +1 in sf
+    let step = ((ics0.len_bits() - target_bits) as f64 / slope).ceil() as i32;
+    let sf = (sf_min + step).clamp(sf_min, 255);
+    build_ics(spec, swb, sf)
 }
 
 fn write_adts(out: &mut Vec<u8>, sr_index: u8, channels: u16, frame_len: usize) {
