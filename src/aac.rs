@@ -1788,6 +1788,22 @@ fn build_ics(spec: &[f64], swb: &[usize], sf: i32) -> BitWriter {
 /// Encode one channel by choosing the global scalefactor in **closed form** — no
 /// rate-control search loop (the platonic B/U form of the two-loop encoder).
 ///
+/// This is an instance of the sanguine closure
+/// `Substrate.StationaryPhase.AutodiffSelectionComposition.UnderdeterminedSetup`
+/// (`proof/Substrate/StationaryPhase/AutodiffSelectionComposition.lean`):
+///
+///   residual(sf)   = |R(sf) − target_bits|     (≥ 0, vanishes at the budget)
+///   recoveredParam = sf*                       (the scalefactor solving R(sf*) = target_bits)
+///   hf_critical    = the one-shot solve below lands on sf*
+///   hf_unique      = R is monotone-decreasing on [sf_min, 255], so the budget
+///                    crossing is unique
+///
+/// Per the headline theorem `recover_via_stationary_phase`, the recovered
+/// parameter IS the point where the residual's derivative vanishes — no
+/// iteration is required to characterise the answer; one closed-form step
+/// suffices. This is the non-coupled, single-shot case of the closure
+/// (the `quadraticRecovery` shape, not the γ̂⇄W fixed-point case).
+///
 /// `sf_min` is the no-clamp floor: below it the loudest line saturates the 8191
 /// quantizer ceiling. Within `[sf_min, 255]` the frame bit count R(sf) decreases
 /// monotonically, and the rate–scalefactor law is analytic: a step of +4 in sf
