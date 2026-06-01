@@ -5,9 +5,21 @@
 
 pub mod aac;
 pub mod aac_tables;
+pub mod av1_dct;
+pub mod av1_ec;
+pub mod av1_intra;
 pub mod codec;
 pub mod flac;
+pub mod h264;
+pub mod h264bits;
+pub mod h264_inter;
+pub mod h264_intra;
+pub mod jpeg;
+pub mod mjpeg;
+pub mod mkv;
 pub mod mp3;
+pub mod mp4;
 pub mod mp3_tables;
 pub mod opus;
 pub mod opus_tables;
+pub mod png;
