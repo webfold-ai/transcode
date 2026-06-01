@@ -470,7 +470,28 @@ pub(crate) fn encode_idr_intra_recon(
             // ── luma 16×16 DC prediction from reconstructed neighbors ──
             let avail_l = mbx > 0;
             let avail_t = mby > 0;
-            let pred_y = dc_pred_16(&rec_y, pw, mbx, mby, avail_l, avail_t);
+            // Choose the I_16x16 prediction mode (0=V 1=H 2=DC 3=Plane) by
+            // minimum SAD against the source over available modes. DC (mode 2)
+            // is always available, so a valid prediction is guaranteed.
+            let mut i16_mode = 2u8;
+            let mut pred16 = [0i32; 256];
+            let mut best_sad = u64::MAX;
+            for m in [2u8, 0, 1, 3] {
+                if let Some(pp) = intra16_pred(&rec_y, pw, mbx, mby, m, avail_l, avail_t) {
+                    let mut sad = 0u64;
+                    for yy in 0..16 {
+                        for xx in 0..16 {
+                            let s = src_y[(mby * 16 + yy) * pw + (mbx * 16 + xx)] as i32;
+                            sad += (s - pp[yy * 16 + xx]).unsigned_abs() as u64;
+                        }
+                    }
+                    if sad < best_sad {
+                        best_sad = sad;
+                        i16_mode = m;
+                        pred16 = pp;
+                    }
+                }
+            }
 
             // residuals per 4×4, forward transform, collect DC, quant AC
             let mut dc_vals = [0i32; 16]; // DC per block in raster blk grid (we map by blkIdx→raster pos)
@@ -484,7 +505,8 @@ pub(crate) fn encode_idr_intra_recon(
                 for yy in 0..4 {
                     for xx in 0..4 {
                         let px = src_y[(mby * 16 + by + yy) * pw + (mbx * 16 + bx + xx)] as i32;
-                        resid[yy * 4 + xx] = px - pred_y;
+                        let pp = pred16[(by + yy) * 16 + (bx + xx)];
+                        resid[yy * 4 + xx] = px - pp;
                     }
                 }
                 wblocks[blk] = fwd_core(&resid);
@@ -561,7 +583,7 @@ pub(crate) fn encode_idr_intra_recon(
                 let (bx, by) = BLK_XY[blk];
                 for yy in 0..4 {
                     for xx in 0..4 {
-                        let v = pred_y + ac_recon[blk][yy * 4 + xx];
+                        let v = pred16[(by + yy) * 16 + (bx + xx)] + ac_recon[blk][yy * 4 + xx];
                         let vv = v.clamp(0, 255) as u8;
                         rec_y[(mby * 16 + by + yy) * pw + (mbx * 16 + bx + xx)] = vv;
                     }
@@ -694,8 +716,8 @@ pub(crate) fn encode_idr_intra_recon(
             // CBPChroma: 0=none, 1=DC only, 2=DC+AC. We always send chroma DC, so
             // min is 1; 2 if any AC coeff is nonzero.
             let cbp_chroma: u32 = if cbp_chroma_ac { 2 } else { 1 };
-            // I_16x16, pred mode 2 (DC): mb_type = 1 + 2 + 4*cbpC + 12*cbpLflag
-            let mb_type = 1 + 2 + 4 * cbp_chroma + 12 * cbp_luma_flag;
+            // I_16x16: mb_type = 1 + Intra16x16PredMode + 4*CBPChroma + 12*CBPLumaFlag
+            let mb_type = 1 + i16_mode as u32 + 4 * cbp_chroma + 12 * cbp_luma_flag;
             bw.ue(mb_type);
             bw.ue(0); // intra_chroma_pred_mode = DC
             bw.se(0); // mb_qp_delta = 0
@@ -765,6 +787,73 @@ pub(crate) fn encode_idr_intra_recon(
     }
 
     Ok((bw.into_rbsp(), (ry, rcb, rcr)))
+}
+
+// ── I_16x16 luma prediction (H.264 8.3.3): modes 0=V 1=H 2=DC 3=Plane ──
+// Produces a full 16×16 prediction from reconstructed left/top neighbours.
+// Returns None if the chosen mode's required neighbours are unavailable.
+fn intra16_pred(rec: &[u8], pw: usize, mbx: usize, mby: usize, mode: u8, al: bool, at: bool) -> Option<[i32; 256]> {
+    let x0 = mbx * 16;
+    let y0 = mby * 16;
+    let top = |i: usize| rec[(y0 - 1) * pw + (x0 + i)] as i32;
+    let left = |i: usize| rec[(y0 + i) * pw + (x0 - 1)] as i32;
+    let mut p = [0i32; 256];
+    match mode {
+        0 => {
+            // Vertical: needs top
+            if !at {
+                return None;
+            }
+            for yy in 0..16 {
+                for xx in 0..16 {
+                    p[yy * 16 + xx] = top(xx);
+                }
+            }
+        }
+        1 => {
+            // Horizontal: needs left
+            if !al {
+                return None;
+            }
+            for yy in 0..16 {
+                for xx in 0..16 {
+                    p[yy * 16 + xx] = left(yy);
+                }
+            }
+        }
+        2 => {
+            // DC: the existing scalar value, broadcast
+            let dc = dc_pred_16(rec, pw, mbx, mby, al, at);
+            p.fill(dc);
+        }
+        3 => {
+            // Plane: needs both top and left (and the top-left corner)
+            if !al || !at {
+                return None;
+            }
+            let tl = rec[(y0 - 1) * pw + (x0 - 1)] as i32;
+            let mut hh = 0i32;
+            let mut vv = 0i32;
+            for i in 0..7 {
+                hh += (i as i32 + 1) * (top(8 + i) - top(6 - i));
+                vv += (i as i32 + 1) * (left(8 + i) - left(6 - i));
+            }
+            // i=7 term uses top[15]/left[15] vs the top-left corner
+            hh += 8 * (top(15) - tl);
+            vv += 8 * (left(15) - tl);
+            let b = (5 * hh + 32) >> 6;
+            let c = (5 * vv + 32) >> 6;
+            let a = 16 * (top(15) + left(15));
+            for yy in 0..16 {
+                for xx in 0..16 {
+                    let v = (a + b * (xx as i32 - 7) + c * (yy as i32 - 7) + 16) >> 5;
+                    p[yy * 16 + xx] = v.clamp(0, 255);
+                }
+            }
+        }
+        _ => return None,
+    }
+    Some(p)
 }
 
 // ── prediction helpers ──────────────────────────────────────────────────────
