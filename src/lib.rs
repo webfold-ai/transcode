@@ -11,6 +11,7 @@ pub mod av1_intra;
 pub mod codec;
 pub mod flac;
 pub mod h264;
+pub mod heif;
 pub mod h264bits;
 pub mod h264_i4x4;
 pub mod h264_inter;
