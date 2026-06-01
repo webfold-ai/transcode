@@ -134,7 +134,55 @@ fn emit_nal(out: &mut Vec<u8>, nal_ref_idc: u8, nal_unit_type: u8, rbsp: &[u8]) 
 
 /// Encode RGBA frames for MP4 muxing: returns (SPS NAL, PPS NAL, per-frame IDR
 /// NAL units) — all without start codes, ready for AVCC length-prefixing.
+/// Default quantiser for the compressed intra path (SliceQP = 26).
+pub const DEFAULT_QP: i32 = 26;
+
+/// Build an MP4 video track: returns (SPS NAL, PPS NAL, per-frame IDR NAL
+/// samples). Uses the **compressed** adaptive intra encoder (per-MB I_16x16 /
+/// I_4x4 free-energy decision) at `DEFAULT_QP`. The SPS/PPS are the
+/// `h264bits` parameter sets the intra slices are validated against (PPS has
+/// `deblocking_filter_control_present` so the slice can disable the loop
+/// filter for decoder-exact reconstruction).
 pub fn encode_mp4_track(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<Vec<u8>>), String> {
+    encode_mp4_track_qp(frames, width, height, DEFAULT_QP)
+}
+
+/// As [`encode_mp4_track`] but with an explicit quantiser (lower = higher
+/// quality + larger). `qp` is the H.264 SliceQP (0..51).
+pub fn encode_mp4_track_qp(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    qp: i32,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<Vec<u8>>), String> {
+    if frames.is_empty() {
+        return Err("H264: no frames".into());
+    }
+    if width == 0 || height == 0 {
+        return Err("H264: zero dimension".into());
+    }
+    let need = (width * height * 4) as usize;
+    let sps = nal_unit(3, 7, &crate::h264bits::build_sps(width, height));
+    let pps = nal_unit(3, 8, &crate::h264bits::build_pps());
+    let mut samples = Vec::with_capacity(frames.len());
+    for (i, f) in frames.iter().enumerate() {
+        if f.len() < need {
+            return Err(format!("H264: frame {i} buffer too small"));
+        }
+        let slice = crate::h264_intra::encode_idr_adaptive(width, height, f, qp, i as u32)?;
+        samples.push(nal_unit(3, 5, &slice));
+    }
+    Ok((sps, pps, samples))
+}
+
+/// Lossless I_PCM track (every MB stored raw, no transform/quant). Larger than
+/// any compressed mode but exactly reconstructs the source — kept for the
+/// archival/verification use case. Returns (SPS, PPS, samples).
+pub fn encode_mp4_track_lossless(
     frames: &[Vec<u8>],
     width: u32,
     height: u32,
@@ -316,14 +364,39 @@ fn build_idr_slice(width: u32, height: u32, rgba: &[u8], idr_id: u32) -> Vec<u8>
     bw.into_rbsp()
 }
 
-/// Encode a single RGBA8 frame to an H.264 Annex-B stream (SPS + PPS + 1 IDR).
+/// Encode a single RGBA8 frame to a compressed H.264 Annex-B stream
+/// (SPS + PPS + 1 IDR) at [`DEFAULT_QP`].
 pub fn encode_frame(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     encode_sequence(std::slice::from_ref(&rgba.to_vec()), width, height)
 }
 
-/// Encode a sequence of RGBA8 frames as an intra-only (all-IDR) H.264 Annex-B
-/// stream. `frames[i]` is `width*height*4` bytes.
+/// Encode a sequence of RGBA8 frames as a **compressed** intra-only (all-IDR)
+/// H.264 Annex-B stream at [`DEFAULT_QP`], using the adaptive per-MB
+/// I_16x16/I_4x4 encoder. `frames[i]` is `width*height*4` bytes.
 pub fn encode_sequence(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    encode_sequence_qp(frames, width, height, DEFAULT_QP)
+}
+
+/// As [`encode_sequence`] with an explicit quantiser.
+pub fn encode_sequence_qp(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    qp: i32,
+) -> Result<Vec<u8>, String> {
+    if width == 0 || height == 0 {
+        return Err("H264: zero dimension".into());
+    }
+    crate::h264_intra::encode_sequence_adaptive_with_recon(frames, width, height, qp).map(|(s, _)| s)
+}
+
+/// Lossless I_PCM Annex-B stream (every MB stored raw). Exactly reconstructs
+/// the source; far larger than the compressed path.
+pub fn encode_sequence_lossless(
     frames: &[Vec<u8>],
     width: u32,
     height: u32,

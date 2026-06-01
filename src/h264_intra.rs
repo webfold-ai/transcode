@@ -591,6 +591,12 @@ pub fn encode_sequence_adaptive_with_recon(
     Ok((out, recons))
 }
 
+/// Encode one IDR frame with the adaptive per-MB type decision, returning just
+/// the slice RBSP (no NAL framing). Used by the MP4 muxer track builder.
+pub fn encode_idr_adaptive(width: u32, height: u32, rgba: &[u8], qp: i32, idr: u32) -> Result<Vec<u8>, String> {
+    Ok(encode_idr_adaptive_recon(width, height, rgba, qp, idr)?.0)
+}
+
 #[allow(clippy::needless_range_loop)]
 fn encode_idr_adaptive_recon(
     width: u32,

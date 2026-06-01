@@ -175,6 +175,43 @@ fn adaptive_decodes_bitexact_in_ffmpeg() {
     run_path("adaptive", transcode::h264_intra::encode_sequence_adaptive_with_recon);
 }
 
+#[test]
+fn mp4_product_path_decodes_in_ffmpeg() {
+    // The public product path: RGBA → compressed adaptive H.264 → MP4 mux
+    // (avcC from SPS/PPS, length-prefixed samples). ffmpeg must demux + decode
+    // it as a real H.264 yuv420p track at the right dimensions.
+    if !ffmpeg_available() {
+        eprintln!("SKIP: ffmpeg not available");
+        return;
+    }
+    let frame = pattern("color");
+    let mp4 = transcode::mp4::encode_rgba_h264_qp(&[frame], W, H, 1, 26).expect("mux mp4");
+    let dir = env!("CARGO_TARGET_TMPDIR");
+    let path = format!("{dir}/product.mp4");
+    std::fs::write(&path, &mp4).expect("write mp4");
+    // demux + decode with no errors
+    let dec = Command::new("ffmpeg")
+        .args(["-hide_banner", "-v", "error", "-i", &path, "-f", "null", "-"])
+        .status()
+        .expect("spawn ffmpeg");
+    assert!(dec.success(), "ffmpeg failed to decode the muxed MP4");
+    // ffprobe: it really is H.264 at W×H
+    let probe = Command::new("ffprobe")
+        .args([
+            "-hide_banner", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height",
+            "-of", "csv=p=0", &path,
+        ])
+        .output()
+        .expect("spawn ffprobe");
+    let s = String::from_utf8_lossy(&probe.stdout);
+    assert!(s.contains("h264"), "not an h264 track: {s}");
+    assert!(s.contains(&W.to_string()) && s.contains(&H.to_string()), "wrong dims: {s}");
+    // the compressed MP4 must be far smaller than raw I_PCM (≈ YUV420 raw size)
+    let ipcm_floor = (W * H * 3 / 2) as usize;
+    assert!(mp4.len() < ipcm_floor, "not compressed: {} >= {}", mp4.len(), ipcm_floor);
+}
+
 // `cargo test --release --test h264_bitexact -- --ignored --nocapture report_sizes`
 // Bitstream-size comparison of the two intra paths over a QP sweep. Both are
 // decoder-exact (asserted above), so this isolates coding efficiency. I_4x4

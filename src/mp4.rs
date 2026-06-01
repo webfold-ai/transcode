@@ -397,7 +397,19 @@ pub fn encode_rgba_h264(
     height: u32,
     fps: u32,
 ) -> Result<Vec<u8>, String> {
-    let (sps, pps, samples) = crate::h264::encode_mp4_track(frames, width, height)?;
+    encode_rgba_h264_qp(frames, width, height, fps, crate::h264::DEFAULT_QP)
+}
+
+/// As [`encode_rgba_h264`] with an explicit H.264 quantiser (lower = higher
+/// quality + larger file).
+pub fn encode_rgba_h264_qp(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    fps: u32,
+    qp: i32,
+) -> Result<Vec<u8>, String> {
+    let (sps, pps, samples) = crate::h264::encode_mp4_track_qp(frames, width, height, qp)?;
     mux_h264(&sps, &pps, &samples, width, height, fps)
 }
 

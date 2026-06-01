@@ -486,6 +486,39 @@ fn main() {
         let secs = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(10.0);
         std::process::exit(bench(secs));
     }
+    // Encode a PNG to a compressed H.264/MP4 (adaptive intra). Usage:
+    //   --png-to-mp4 <in.png> <out.mp4> [qp]   (qp default 26; lower = better)
+    if args.len() >= 4 && args[1] == "--png-to-mp4" {
+        let qp: i32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(26);
+        let bytes = std::fs::read(&args[2]).unwrap_or_else(|e| {
+            eprintln!("read {}: {e}", args[2]);
+            std::process::exit(1);
+        });
+        let img = transcode::png::decode(&bytes).unwrap_or_else(|e| {
+            eprintln!("png decode: {e}");
+            std::process::exit(1);
+        });
+        let frames = vec![img.pixels];
+        match transcode::mp4::encode_rgba_h264_qp(&frames, img.width, img.height, 1, qp) {
+            Ok(mp4) => {
+                std::fs::write(&args[3], &mp4).unwrap_or_else(|e| {
+                    eprintln!("write {}: {e}", args[3]);
+                    std::process::exit(1);
+                });
+                let raw = (img.width * img.height * 3) as usize;
+                println!(
+                    "{}x{} → {} : {} bytes (qp={}, {:.1}x vs raw RGB)",
+                    img.width, img.height, args[3], mp4.len(), qp,
+                    raw as f64 / mp4.len() as f64,
+                );
+            }
+            Err(e) => {
+                eprintln!("h264 encode: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.len() == 4 && args[1] == "--from-mp3" {
         match mp3::decode_pcm(&std::fs::read(&args[2]).unwrap_or_default()) {
             Ok((s, rate, ch)) => {
