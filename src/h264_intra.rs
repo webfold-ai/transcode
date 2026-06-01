@@ -516,10 +516,12 @@ pub(crate) fn encode_idr_intra_recon(
             let dc_had = hadamard4(&dc_vals);
             let qbits = 15 + qp / 6;
             let rem = (qp % 6) as usize;
-            // Forward DC quant: the unnormalised 2-D Hadamard adds ×16, so the
-            // forward shift is qbits+4 (not qbits+1) to invert the spec §8.5.10
-            // 16·V dequant. Round-trip with the 16·V inverse is then exact.
-            let fq = qbits + 4;
+            // Forward DC quant shift. Solved against a flat-block round-trip with
+            // the FROZEN spec dequant (which keeps ffmpeg bit-exact): qbits+2 makes
+            // a flat residual d reconstruct to d. The earlier qbits+4 was 4× too
+            // coarse — it under-quantized the DC so the spec dequant produced an
+            // under-scaled result (the 30 dB fidelity ceiling). Dequant unchanged.
+            let fq = qbits + 2;
             let f = (1i64 << fq) / 3;
             let mut dc_z = [0i32; 16];
             for i in 0..16 {
