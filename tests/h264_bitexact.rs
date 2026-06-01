@@ -163,3 +163,29 @@ fn i4x4_decodes_bitexact_in_ffmpeg() {
     }
     run_path("i4x4", transcode::h264_intra::encode_sequence_i4x4_with_recon);
 }
+
+// `cargo test --release --test h264_bitexact -- --ignored --nocapture report_sizes`
+// Bitstream-size comparison of the two intra paths over a QP sweep. Both are
+// decoder-exact (asserted above), so this isolates coding efficiency. I_4x4
+// wins where directional prediction tracks the content (e.g. gradients) and
+// loses where the per-block mode signalling (16 modes/MB) isn't recouped —
+// there is no per-MB I_16x16-vs-I_4x4 rate-distortion decision yet, so every
+// MB here is forced to one type.
+#[test]
+#[ignore]
+fn report_sizes() {
+    for kind in ["flat", "ramp", "color", "noise"] {
+        let frames = vec![pattern(kind)];
+        println!("\n[{kind}]");
+        for qp in [18i32, 26, 34, 40] {
+            let (s16, _) = transcode::h264_intra::encode_sequence_with_recon(&frames, W, H, qp).unwrap();
+            let (s4, _) = transcode::h264_intra::encode_sequence_i4x4_with_recon(&frames, W, H, qp).unwrap();
+            println!(
+                "  qp{qp:>2}: i16={:>5}B  i4x4={:>5}B  ({:+.0}%)",
+                s16.len(),
+                s4.len(),
+                100.0 * (s4.len() as f64 - s16.len() as f64) / s16.len() as f64,
+            );
+        }
+    }
+}
