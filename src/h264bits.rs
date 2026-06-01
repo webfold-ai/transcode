@@ -49,6 +49,11 @@ impl BitWriter {
     pub fn byte_aligned(&self) -> bool {
         self.nbits == 0
     }
+    /// Total bits written so far. Used by the adaptive encoder's rate trial
+    /// (encode a candidate MB into a scratch writer, read its length, discard).
+    pub fn bit_len(&self) -> usize {
+        self.buf.len() * 8 + self.nbits as usize
+    }
     pub fn align_zero(&mut self) {
         while self.nbits != 0 {
             self.put_bit(0);

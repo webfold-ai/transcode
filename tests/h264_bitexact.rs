@@ -164,6 +164,17 @@ fn i4x4_decodes_bitexact_in_ffmpeg() {
     run_path("i4x4", transcode::h264_intra::encode_sequence_i4x4_with_recon);
 }
 
+#[test]
+fn adaptive_decodes_bitexact_in_ffmpeg() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP: ffmpeg not available — cannot run the decode oracle");
+        return;
+    }
+    // The per-MB free-energy decision mixes I_16x16 and I_4x4 MBs in one slice;
+    // ffmpeg must still reconstruct every MB exactly.
+    run_path("adaptive", transcode::h264_intra::encode_sequence_adaptive_with_recon);
+}
+
 // `cargo test --release --test h264_bitexact -- --ignored --nocapture report_sizes`
 // Bitstream-size comparison of the two intra paths over a QP sweep. Both are
 // decoder-exact (asserted above), so this isolates coding efficiency. I_4x4
@@ -180,11 +191,14 @@ fn report_sizes() {
         for qp in [18i32, 26, 34, 40] {
             let (s16, _) = transcode::h264_intra::encode_sequence_with_recon(&frames, W, H, qp).unwrap();
             let (s4, _) = transcode::h264_intra::encode_sequence_i4x4_with_recon(&frames, W, H, qp).unwrap();
+            let (sa, _) = transcode::h264_intra::encode_sequence_adaptive_with_recon(&frames, W, H, qp).unwrap();
+            let best = s16.len().min(s4.len());
             println!(
-                "  qp{qp:>2}: i16={:>5}B  i4x4={:>5}B  ({:+.0}%)",
+                "  qp{qp:>2}: i16={:>5}B  i4x4={:>5}B  adaptive={:>5}B  (vs best-fixed {:+.0}%)",
                 s16.len(),
                 s4.len(),
-                100.0 * (s4.len() as f64 - s16.len() as f64) / s16.len() as f64,
+                sa.len(),
+                100.0 * (sa.len() as f64 - best as f64) / best as f64,
             );
         }
     }

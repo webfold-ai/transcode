@@ -501,89 +501,18 @@ fn encode_idr_i4x4_recon(
             // per-8×8 luma coded_block_pattern (bit r set ⇒ any nonzero in blocks 4r..4r+4)
             let mut cbp_luma = 0u32;
             for r in 0..4 {
-                let nz = (0..4).any(|k| luma.coeffs[r * 4 + k].iter().any(|&c| c != 0));
-                if nz {
+                if (0..4).any(|k| luma.coeffs[r * 4 + k].iter().any(|&c| c != 0)) {
                     cbp_luma |= 1 << r;
                 }
             }
-
             // chroma (shared path) — always coded, so CBPChroma ≥ 1
-            let cm =
-                encode_chroma_mb(&src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t);
-            let cbp_chroma: u32 = if cm.cbp_chroma_ac { 2 } else { 1 };
-            let cbp = cbp_luma | (cbp_chroma << 4);
-
-            // ── macroblock_layer: I_NxN ──
-            bw.ue(0); // mb_type = 0 → I_NxN (Intra_4x4)
-            // mb_pred: per-block intra4x4 mode signalling (most-probable-mode)
-            for blk in 0..16 {
-                let (bx, by) = BLK_XY[blk];
-                let fx = mbx * 4 + bx / 4;
-                let fy = mby * 4 + by / 4;
-                // predicted mode = Min(left,top); DC if either neighbour absent
-                let pred_mode = if fx == 0 || fy == 0 {
-                    2
-                } else {
-                    mode_grid[fy * lw4 + (fx - 1)].min(mode_grid[(fy - 1) * lw4 + fx])
-                };
-                let actual = luma.modes[blk] as i32;
-                if actual == pred_mode {
-                    bw.put_flag(true); // prev_intra4x4_pred_mode_flag
-                } else {
-                    bw.put_flag(false);
-                    let rem = if actual < pred_mode { actual } else { actual - 1 };
-                    bw.put_bits(rem as u32, 3); // rem_intra4x4_pred_mode
-                }
-                mode_grid[fy * lw4 + fx] = actual;
-            }
-            bw.ue(0); // intra_chroma_pred_mode = DC
-
-            // coded_block_pattern (me(v): Intra_4x4 golomb mapping)
-            bw.ue(crate::h264_i4x4::intra4x4_cbp_to_golomb(cbp as u8));
-            if cbp > 0 {
-                bw.se(0); // mb_qp_delta = 0
-            }
-
-            // residual() — I_NxN: luma 4×4 (full, per coded 8×8), chroma DC, chroma AC
-            let mut cav = Cavlc { bw: &mut bw };
-            for r in 0..4 {
-                if cbp_luma & (1 << r) != 0 {
-                    for k in 0..4 {
-                        let blk = r * 4 + k;
-                        let nc = luma_nc(&nz_luma, lw4, mbx, mby, blk);
-                        let scan: Vec<i32> = ZZ4.iter().map(|&i| luma.coeffs[blk][i]).collect();
-                        let tc = cav.block(&scan, nc);
-                        set_luma_nz(&mut nz_luma, lw4, mbx, mby, blk, tc as i32);
-                    }
-                } else {
-                    for k in 0..4 {
-                        set_luma_nz(&mut nz_luma, lw4, mbx, mby, r * 4 + k, 0);
-                    }
-                }
-            }
-            // chroma DC (both planes), nC = -1
-            for pi in 0..2 {
-                cav.block(&cm.planes[pi].0, -1);
-            }
-            // chroma AC (both planes) iff CBPChroma == 2
-            if cbp_chroma == 2 {
-                for pi in 0..2 {
-                    let grid: &mut Vec<i32> = if pi == 0 { &mut nz_cb } else { &mut nz_cr };
-                    for sb in 0..4 {
-                        let nc = chroma_ac_nc(grid, cw4, mbx, mby, sb);
-                        let ac_scan: Vec<i32> =
-                            ZZ4.iter().skip(1).map(|&i| cm.planes[pi].1[sb][i]).collect();
-                        let tc = cav.block(&ac_scan, nc);
-                        set_chroma_ac_nz(grid, cw4, mbx, mby, sb, tc as i32);
-                    }
-                }
-            } else {
-                for grid in [&mut nz_cb, &mut nz_cr] {
-                    for sb in 0..4 {
-                        set_chroma_ac_nz(grid, cw4, mbx, mby, sb, 0);
-                    }
-                }
-            }
+            let cm = encode_chroma_mb(
+                &src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t,
+            );
+            emit_mb_i4x4(
+                &mut bw, &luma, cbp_luma, &cm, &mut nz_luma, lw4, &mut mode_grid,
+                &mut nz_cb, &mut nz_cr, cw4, mbx, mby,
+            );
         }
     }
     bw.trailing_bits();
@@ -605,6 +534,263 @@ fn encode_idr_i4x4_recon(
     }
 
     Ok((bw.into_rbsp(), (ry, rcb, rcr)))
+}
+
+/// Sum of squared luma error between a reconstruction and the source over one
+/// macroblock — the distortion term `D` of the free energy. `rec` is indexed by
+/// the padded stride `pw`; `recon` (when Some) overrides `rec` with a private
+/// 16×16 candidate buffer (raster within the MB).
+fn ssd_luma_mb(rec: &[u8], recon: Option<&[u8; 256]>, src: &[u8], pw: usize, mbx: usize, mby: usize) -> u64 {
+    let mut s = 0u64;
+    for yy in 0..16 {
+        for xx in 0..16 {
+            let a = match recon {
+                Some(r) => r[yy * 16 + xx] as i64,
+                None => rec[(mby * 16 + yy) * pw + (mbx * 16 + xx)] as i64,
+            };
+            let b = src[(mby * 16 + yy) * pw + (mbx * 16 + xx)] as i64;
+            let d = a - b;
+            s += (d * d) as u64;
+        }
+    }
+    s
+}
+
+/// Adaptive intra encoder: per macroblock, choose I_16x16 vs I_4x4 by the
+/// free-energy criterion `F = D + λ·R` (distortion + λ·rate) and emit the
+/// winner. This is the framework's finite **Gate** / stationary-phase
+/// post-selection `P(type) = δ(type − argmin F)` over the two MB types — a
+/// constant-size decision per MB, NOT a search (book: hard_limits §"The Gate";
+/// equations §6). Rate is measured exactly by trial-encoding each candidate
+/// into a scratch writer (the MB's own nC/mode-grid cells are snapshotted and
+/// restored so the trial leaves no residue). The committed reconstruction
+/// stays decoder-exact regardless of which heuristic chose the type.
+#[allow(clippy::needless_range_loop)]
+pub fn encode_sequence_adaptive_with_recon(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    qp: i32,
+) -> Result<(Vec<u8>, Vec<(Vec<u8>, Vec<u8>, Vec<u8>)>), String> {
+    if frames.is_empty() {
+        return Err("H264-adaptive: no frames".into());
+    }
+    let need = (width * height * 4) as usize;
+    let mut out = Vec::new();
+    emit_nal(&mut out, 3, 7, &build_sps(width, height));
+    emit_nal(&mut out, 3, 8, &build_pps());
+    let mut recons = Vec::new();
+    for (i, f) in frames.iter().enumerate() {
+        if f.len() < need {
+            return Err(format!("H264-adaptive: frame {i} too small"));
+        }
+        let (slice, recon) = encode_idr_adaptive_recon(width, height, f, qp, i as u32)?;
+        emit_nal(&mut out, 3, 5, &slice);
+        recons.push(recon);
+    }
+    Ok((out, recons))
+}
+
+#[allow(clippy::needless_range_loop)]
+fn encode_idr_adaptive_recon(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    qp: i32,
+    idr: u32,
+) -> Result<(Vec<u8>, (Vec<u8>, Vec<u8>, Vec<u8>)), String> {
+    let w = width as usize;
+    let h = height as usize;
+    let mbw = ((width + 15) / 16) as usize;
+    let mbh = ((height + 15) / 16) as usize;
+    let pw = mbw * 16;
+    let ph = mbh * 16;
+    let cw = pw / 2;
+    let ch = ph / 2;
+
+    let mut src_y = vec![0u8; pw * ph];
+    let mut src_cb = vec![0u8; cw * ch];
+    let mut src_cr = vec![0u8; cw * ch];
+    {
+        for y in 0..ph {
+            for x in 0..pw {
+                let sx = x.min(w - 1);
+                let sy = y.min(h - 1);
+                let i = (sy * w + sx) * 4;
+                let (yy, _, _) =
+                    rgb_to_ycbcr601_limited(rgba[i] as f32, rgba[i + 1] as f32, rgba[i + 2] as f32);
+                src_y[y * pw + x] = yy;
+            }
+        }
+        for cy in 0..ch {
+            for cx in 0..cw {
+                let mut sb = 0u32;
+                let mut sr = 0u32;
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        let x = (cx * 2 + dx).min(w - 1);
+                        let y = (cy * 2 + dy).min(h - 1);
+                        let i = (y * w + x) * 4;
+                        let (_, cb, cr) = rgb_to_ycbcr601_limited(
+                            rgba[i] as f32,
+                            rgba[i + 1] as f32,
+                            rgba[i + 2] as f32,
+                        );
+                        sb += cb as u32;
+                        sr += cr as u32;
+                    }
+                }
+                src_cb[cy * cw + cx] = ((sb + 2) / 4) as u8;
+                src_cr[cy * cw + cx] = ((sr + 2) / 4) as u8;
+            }
+        }
+    }
+
+    let mut rec_y = vec![0u8; pw * ph];
+    let mut rec_cb = vec![0u8; cw * ch];
+    let mut rec_cr = vec![0u8; cw * ch];
+    let lw4 = pw / 4;
+    let lh4 = ph / 4;
+    let mut nz_luma = vec![-1i32; lw4 * lh4];
+    let cw4 = cw / 4;
+    let ch4 = ch / 4;
+    let mut nz_cb = vec![-1i32; cw4 * ch4];
+    let mut nz_cr = vec![-1i32; cw4 * ch4];
+    let mut mode_grid = vec![-1i32; lw4 * lh4];
+    let lambda = rdo_lambda(qp);
+
+    let mut bw = BitWriter::new();
+    bw.ue(0); // first_mb_in_slice
+    bw.ue(7); // slice_type = I
+    bw.ue(0); // pps id
+    bw.put_bits(0, 4); // frame_num
+    bw.ue(idr); // idr_pic_id
+    bw.put_bits(0, 4); // poc lsb
+    bw.put_flag(false);
+    bw.put_flag(false);
+    bw.se(qp - 26);
+    bw.ue(1); // disable_deblocking_filter_idc = 1
+
+    for mby in 0..mbh {
+        for mbx in 0..mbw {
+            let avail_l = mbx > 0;
+            let avail_t = mby > 0;
+            let avail_tr = avail_t && (mbx + 1) < mbw;
+
+            // Chroma is identical for both luma types (independent of luma) —
+            // compute and commit once; it adds an equal constant to both costs.
+            let cm = encode_chroma_mb(
+                &src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t,
+            );
+
+            // ── candidate A: I_4x4 (writes its reconstruction into rec_y) ──
+            let i4 = crate::h264_i4x4::encode_luma_i4x4(
+                &src_y, &mut rec_y, pw, ph, mbx, mby, qp, &BLK_XY, avail_l, avail_t, avail_tr,
+            );
+            let mut cbp_luma4 = 0u32;
+            for r in 0..4 {
+                if (0..4).any(|k| i4.coeffs[r * 4 + k].iter().any(|&c| c != 0)) {
+                    cbp_luma4 |= 1 << r;
+                }
+            }
+            let d4 = ssd_luma_mb(&rec_y, None, &src_y, pw, mbx, mby);
+            let r4 = trial_rate_i4x4(
+                &i4, cbp_luma4, &cm, &mut nz_luma, lw4, &mut mode_grid, &mut nz_cb, &mut nz_cr, cw4, mbx, mby,
+            );
+
+            // ── candidate B: I_16x16 (private recon; reads only out-of-MB
+            // neighbours, so I_4x4's interior writes don't perturb it) ──
+            let i16 = encode_luma_i16(&src_y, &rec_y, pw, mbx, mby, qp, avail_l, avail_t);
+            let d16 = ssd_luma_mb(&rec_y, Some(&i16.recon), &src_y, pw, mbx, mby);
+            let r16 = trial_rate_i16(&i16, &cm, &mut nz_luma, lw4, &mut nz_cb, &mut nz_cr, cw4, mbx, mby);
+
+            // ── free-energy collapse: P(type) = δ(type − argmin F) ──
+            let f4 = d4 as f64 + lambda * r4 as f64;
+            let f16 = d16 as f64 + lambda * r16 as f64;
+            if f16 <= f4 {
+                // commit I_16x16 recon over the I_4x4 interior writes
+                for yy in 0..16 {
+                    for xx in 0..16 {
+                        rec_y[(mby * 16 + yy) * pw + (mbx * 16 + xx)] = i16.recon[yy * 16 + xx];
+                    }
+                }
+                emit_mb_i16(&mut bw, &i16, &cm, &mut nz_luma, lw4, &mut nz_cb, &mut nz_cr, cw4, mbx, mby);
+                // an I_16x16 MB contributes DC (mode 2) to neighbours' MPM
+                for fy in mby * 4..mby * 4 + 4 {
+                    for fx in mbx * 4..mbx * 4 + 4 {
+                        mode_grid[fy * lw4 + fx] = 2;
+                    }
+                }
+            } else {
+                // rec_y already holds the I_4x4 reconstruction
+                emit_mb_i4x4(
+                    &mut bw, &i4, cbp_luma4, &cm, &mut nz_luma, lw4, &mut mode_grid,
+                    &mut nz_cb, &mut nz_cr, cw4, mbx, mby,
+                );
+            }
+        }
+    }
+    bw.trailing_bits();
+
+    let mut ry = vec![0u8; w * h];
+    for y in 0..h {
+        ry[y * w..y * w + w].copy_from_slice(&rec_y[y * pw..y * pw + w]);
+    }
+    let cw2 = (w + 1) / 2;
+    let chh = (h + 1) / 2;
+    let mut rcb = vec![0u8; cw2 * chh];
+    let mut rcr = vec![0u8; cw2 * chh];
+    for y in 0..chh {
+        for x in 0..cw2 {
+            rcb[y * cw2 + x] = rec_cb[y * cw + x];
+            rcr[y * cw2 + x] = rec_cr[y * cw + x];
+        }
+    }
+    Ok((bw.into_rbsp(), (ry, rcb, rcr)))
+}
+
+/// Exact bit cost of emitting an I_4x4 candidate, measured by trial-encoding
+/// into a scratch writer. The MB's own nC/mode-grid cells (a 4×4 luma block and
+/// a 2×2 chroma block) are snapshotted then restored, so the global grids are
+/// left untouched and the trial is O(1) per MB; cross-MB neighbour context is
+/// read live from the committed grids, which is correct.
+#[allow(clippy::too_many_arguments)]
+fn trial_rate_i4x4(
+    luma: &crate::h264_i4x4::I4x4Luma, cbp_luma: u32, cm: &ChromaMb,
+    nz_luma: &mut [i32], lw4: usize, mode_grid: &mut [i32], nz_cb: &mut [i32], nz_cr: &mut [i32],
+    cw4: usize, mbx: usize, mby: usize,
+) -> usize {
+    let sl = snap_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4);
+    let sm = snap_rect(mode_grid, lw4, mbx * 4, mby * 4, 4, 4);
+    let sb = snap_rect(nz_cb, cw4, mbx * 2, mby * 2, 2, 2);
+    let sr = snap_rect(nz_cr, cw4, mbx * 2, mby * 2, 2, 2);
+    let mut tb = BitWriter::new();
+    emit_mb_i4x4(&mut tb, luma, cbp_luma, cm, nz_luma, lw4, mode_grid, nz_cb, nz_cr, cw4, mbx, mby);
+    let bits = tb.bit_len();
+    restore_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4, &sl);
+    restore_rect(mode_grid, lw4, mbx * 4, mby * 4, 4, 4, &sm);
+    restore_rect(nz_cb, cw4, mbx * 2, mby * 2, 2, 2, &sb);
+    restore_rect(nz_cr, cw4, mbx * 2, mby * 2, 2, 2, &sr);
+    bits
+}
+
+/// Exact bit cost of emitting an I_16x16 candidate (trial encode). See
+/// [`trial_rate_i4x4`]; I_16x16 does not touch the mode grid.
+#[allow(clippy::too_many_arguments)]
+fn trial_rate_i16(
+    i16: &I16Luma, cm: &ChromaMb,
+    nz_luma: &mut [i32], lw4: usize, nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize, mbx: usize, mby: usize,
+) -> usize {
+    let sl = snap_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4);
+    let sb = snap_rect(nz_cb, cw4, mbx * 2, mby * 2, 2, 2);
+    let sr = snap_rect(nz_cr, cw4, mbx * 2, mby * 2, 2, 2);
+    let mut tb = BitWriter::new();
+    emit_mb_i16(&mut tb, i16, cm, nz_luma, lw4, nz_cb, nz_cr, cw4, mbx, mby);
+    let bits = tb.bit_len();
+    restore_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4, &sl);
+    restore_rect(nz_cb, cw4, mbx * 2, mby * 2, 2, 2, &sb);
+    restore_rect(nz_cr, cw4, mbx * 2, mby * 2, 2, 2, &sr);
+    bits
 }
 
 #[allow(clippy::needless_range_loop)]
@@ -700,191 +886,19 @@ pub(crate) fn encode_idr_intra_recon(
 
     for mby in 0..mbh {
         for mbx in 0..mbw {
-            // ── luma 16×16 DC prediction from reconstructed neighbors ──
             let avail_l = mbx > 0;
             let avail_t = mby > 0;
-            // Choose the I_16x16 prediction mode (0=V 1=H 2=DC 3=Plane) by
-            // minimum SAD against the source over available modes. DC (mode 2)
-            // is always available, so a valid prediction is guaranteed.
-            let mut i16_mode = 2u8;
-            let mut pred16 = [0i32; 256];
-            let mut best_sad = u64::MAX;
-            for m in [2u8, 0, 1, 3] {
-                if let Some(pp) = intra16_pred(&rec_y, pw, mbx, mby, m, avail_l, avail_t) {
-                    let mut sad = 0u64;
-                    for yy in 0..16 {
-                        for xx in 0..16 {
-                            let s = src_y[(mby * 16 + yy) * pw + (mbx * 16 + xx)] as i32;
-                            sad += (s - pp[yy * 16 + xx]).unsigned_abs() as u64;
-                        }
-                    }
-                    if sad < best_sad {
-                        best_sad = sad;
-                        i16_mode = m;
-                        pred16 = pp;
-                    }
+            // I_16x16 luma candidate → commit its reconstruction into rec_y.
+            let i16 = encode_luma_i16(&src_y, &rec_y, pw, mbx, mby, qp, avail_l, avail_t);
+            for yy in 0..16 {
+                for xx in 0..16 {
+                    rec_y[(mby * 16 + yy) * pw + (mbx * 16 + xx)] = i16.recon[yy * 16 + xx];
                 }
             }
-
-            // residuals per 4×4, forward transform, collect DC, quant AC
-            let mut dc_vals = [0i32; 16]; // DC per block in raster blk grid (we map by blkIdx→raster pos)
-            let mut ac_z: [[i32; 16]; 16] = [[0; 16]; 16];
-            let mut ac_recon: [[i32; 16]; 16] = [[0; 16]; 16];
-            // first: forward transform each block, capture DC (pre-quant W[0])
-            let mut wblocks: [[i32; 16]; 16] = [[0; 16]; 16];
-            for blk in 0..16 {
-                let (bx, by) = BLK_XY[blk];
-                let mut resid = [0i32; 16];
-                for yy in 0..4 {
-                    for xx in 0..4 {
-                        let px = src_y[(mby * 16 + by + yy) * pw + (mbx * 16 + bx + xx)] as i32;
-                        let pp = pred16[(by + yy) * 16 + (bx + xx)];
-                        resid[yy * 4 + xx] = px - pp;
-                    }
-                }
-                wblocks[blk] = fwd_core(&resid);
-                dc_vals[DC_RASTER[blk]] = wblocks[blk][0];
-            }
-            // luma DC: Hadamard then quant (DC has its own scaling)
-            let dc_had = hadamard4(&dc_vals);
-            let qbits = 15 + qp / 6;
-            let rem = (qp % 6) as usize;
-            // Forward DC quant shift. Solved against a flat-block round-trip with
-            // the FROZEN spec dequant (which keeps ffmpeg bit-exact): qbits+2 makes
-            // a flat residual d reconstruct to d. The earlier qbits+4 was 4× too
-            // coarse — it under-quantized the DC so the spec dequant produced an
-            // under-scaled result (the 30 dB fidelity ceiling). Dequant unchanged.
-            let fq = qbits + 2;
-            let f = (1i64 << fq) / 3;
-            let mut dc_z = [0i32; 16];
-            for i in 0..16 {
-                let mf = MF[rem][0] as i64;
-                let v = dc_had[i] as i64;
-                let zz = ((v.abs() * mf + f) >> fq) as i32;
-                dc_z[i] = if v < 0 { -zz } else { zz };
-            }
-            // dequant DC (inverse Hadamard then scale) for reconstruction
-            let dc_deq = hadamard4(&dc_z); // inverse Hadamard == forward (orthogonal, /4 handled by scale)
-            let mut dc_recon = [0i32; 16];
-            let shift = qp / 6;
-            for i in 0..16 {
-                // DC inverse scaling consistent with the forward >>(qbits+1):
-                // the unnormalised 2-D Hadamard contributes a ×16, so the
-                // round-trip-consistent inverse weight is 2·V (not 16·V).
-                let vv = V[rem][0]; // LevelScale = weightScale(16)·normAdjust(V); spec §8.5.10
-                if shift >= 6 {
-                    dc_recon[i] = (dc_deq[i] * vv) << (shift - 2); // (f·16·V)<<(shift-6)
-                } else {
-                    dc_recon[i] = (dc_deq[i] * vv * 16 + (1 << (5 - shift))) >> (6 - shift);
-                }
-            }
-
-            // AC: quant each block's AC coeffs (excluding DC), reconstruct full block
-            let mut cbp_luma_nonzero = false;
-            for blk in 0..16 {
-                // build W with DC replaced by reconstructed DC for this block
-                let mut wq = [0i32; 16];
-                // AC quant
-                let mut z = [0i32; 16];
-                for i in 1..16 {
-                    let cl = pos_class(i);
-                    let mf = MF[rem][cl] as i64;
-                    let wv = wblocks[blk][i] as i64;
-                    let f_ac = (1i64 << qbits) / 3;
-                    let zz = ((wv.abs() * mf + f_ac) >> qbits) as i32;
-                    z[i] = if wv < 0 { -zz } else { zz };
-                    if z[i] != 0 {
-                        cbp_luma_nonzero = true;
-                    }
-                }
-                ac_z[blk] = z;
-                // dequant AC: LevelScale = weightScale(16) * normAdjust(V). 8.5.12.1.
-                for i in 1..16 {
-                    let cl = pos_class(i);
-                    let vv = V[rem][cl];
-                    if shift >= 4 {
-                        // (z*16*vv) << (shift-4) == (z*vv) << shift
-                        wq[i] = (z[i] * vv) << shift;
-                    } else {
-                        wq[i] = (z[i] * vv * 16 + (1 << (3 - shift))) >> (4 - shift);
-                    }
-                }
-                wq[0] = dc_recon[DC_RASTER[blk]]; // reconstructed DC for this block (raster→blkIdx)
-                ac_recon[blk] = inv_core(&wq);
-            }
-
-            // write reconstructed luma samples
-            for blk in 0..16 {
-                let (bx, by) = BLK_XY[blk];
-                for yy in 0..4 {
-                    for xx in 0..4 {
-                        let v = pred16[(by + yy) * 16 + (bx + xx)] + ac_recon[blk][yy * 4 + xx];
-                        let vv = v.clamp(0, 255) as u8;
-                        rec_y[(mby * 16 + by + yy) * pw + (mbx * 16 + bx + xx)] = vv;
-                    }
-                }
-            }
-
-            // ── chroma residual (CBPChroma 1 = DC+AC) — shared with I_4x4 ──
             let cm = encode_chroma_mb(
                 &src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t,
             );
-            let chroma_planes = &cm.planes;
-            let cbp_chroma_ac = cm.cbp_chroma_ac;
-
-            // ── mb_type & MB layer ──
-            let cbp_luma_flag = if cbp_luma_nonzero { 1 } else { 0 };
-            // CBPChroma: 0=none, 1=DC only, 2=DC+AC. We always send chroma DC, so
-            // min is 1; 2 if any AC coeff is nonzero.
-            let cbp_chroma: u32 = if cbp_chroma_ac { 2 } else { 1 };
-            // I_16x16: mb_type = 1 + Intra16x16PredMode + 4*CBPChroma + 12*CBPLumaFlag
-            let mb_type = 1 + i16_mode as u32 + 4 * cbp_chroma + 12 * cbp_luma_flag;
-            bw.ue(mb_type);
-            bw.ue(0); // intra_chroma_pred_mode = DC
-            bw.se(0); // mb_qp_delta = 0
-
-            // residual() in H.264 order: luma DC, luma AC, chroma DC (both), chroma AC (both).
-            let mut cav = Cavlc { bw: &mut bw };
-            let nc_dc = luma_nc(&nz_luma, lw4, mbx, mby, 0);
-            let dc_scan: Vec<i32> = ZZ4.iter().map(|&i| dc_z[i]).collect();
-            cav.block(&dc_scan, nc_dc);
-
-            if cbp_luma_flag == 1 {
-                for blk in 0..16 {
-                    let nc = luma_nc(&nz_luma, lw4, mbx, mby, blk);
-                    let ac_scan: Vec<i32> = ZZ4.iter().skip(1).map(|&i| ac_z[blk][i]).collect();
-                    let tc = cav.block(&ac_scan, nc);
-                    set_luma_nz(&mut nz_luma, lw4, mbx, mby, blk, tc as i32);
-                }
-            } else {
-                for blk in 0..16 {
-                    set_luma_nz(&mut nz_luma, lw4, mbx, mby, blk, 0);
-                }
-            }
-
-            // chroma DC blocks (both planes), nC = -1 (chroma-DC context), 4 coeffs
-            for pi in 0..2 {
-                cav.block(&chroma_planes[pi].0, -1);
-            }
-            // chroma AC blocks (both planes) only if CBPChroma == 2
-            if cbp_chroma == 2 {
-                for pi in 0..2 {
-                    let grid: &mut Vec<i32> = if pi == 0 { &mut nz_cb } else { &mut nz_cr };
-                    for sb in 0..4 {
-                        let nc = chroma_ac_nc(grid, cw4, mbx, mby, sb);
-                        let ac_scan: Vec<i32> =
-                            ZZ4.iter().skip(1).map(|&i| chroma_planes[pi].1[sb][i]).collect();
-                        let tc = cav.block(&ac_scan, nc);
-                        set_chroma_ac_nz(grid, cw4, mbx, mby, sb, tc as i32);
-                    }
-                }
-            } else {
-                for grid in [&mut nz_cb, &mut nz_cr] {
-                    for sb in 0..4 {
-                        set_chroma_ac_nz(grid, cw4, mbx, mby, sb, 0);
-                    }
-                }
-            }
+            emit_mb_i16(&mut bw, &i16, &cm, &mut nz_luma, lw4, &mut nz_cb, &mut nz_cr, cw4, mbx, mby);
         }
     }
     bw.trailing_bits();
@@ -1037,6 +1051,272 @@ fn encode_chroma_mb(
         }
     }
     ChromaMb { planes, cbp_chroma_ac }
+}
+
+/// One I_16x16 luma candidate: the 16×16 reconstruction (raster within the MB),
+/// the chosen prediction mode, and the quantised coefficients for emission.
+struct I16Luma {
+    recon: [u8; 256],
+    mode: u8,
+    dc_z: [i32; 16],          // Hadamard-DC levels (raster blk grid)
+    ac_z: [[i32; 16]; 16],    // per-block AC levels (raster within block)
+    cbp_luma_flag: u32,       // 1 if any AC coeff nonzero
+}
+
+/// Compute the I_16x16 luma candidate for one MB: SAD-pick the prediction mode
+/// (V/H/DC/Plane) from the already-reconstructed neighbours in `rec_y`, then
+/// transform + quant (luma-DC Hadamard, qbits+2 forward shift) and reconstruct
+/// into a private 16×16 buffer. Does NOT mutate `rec_y` — the caller commits the
+/// reconstruction only if this candidate wins the per-MB free-energy decision.
+#[allow(clippy::needless_range_loop)]
+fn encode_luma_i16(
+    src_y: &[u8], rec_y: &[u8], pw: usize, mbx: usize, mby: usize, qp: i32,
+    avail_l: bool, avail_t: bool,
+) -> I16Luma {
+    let mut mode = 2u8;
+    let mut pred16 = [0i32; 256];
+    let mut best_sad = u64::MAX;
+    for m in [2u8, 0, 1, 3] {
+        if let Some(pp) = intra16_pred(rec_y, pw, mbx, mby, m, avail_l, avail_t) {
+            let mut sad = 0u64;
+            for yy in 0..16 {
+                for xx in 0..16 {
+                    let s = src_y[(mby * 16 + yy) * pw + (mbx * 16 + xx)] as i32;
+                    sad += (s - pp[yy * 16 + xx]).unsigned_abs() as u64;
+                }
+            }
+            if sad < best_sad {
+                best_sad = sad;
+                mode = m;
+                pred16 = pp;
+            }
+        }
+    }
+
+    let mut dc_vals = [0i32; 16];
+    let mut wblocks: [[i32; 16]; 16] = [[0; 16]; 16];
+    for blk in 0..16 {
+        let (bx, by) = BLK_XY[blk];
+        let mut resid = [0i32; 16];
+        for yy in 0..4 {
+            for xx in 0..4 {
+                let px = src_y[(mby * 16 + by + yy) * pw + (mbx * 16 + bx + xx)] as i32;
+                let pp = pred16[(by + yy) * 16 + (bx + xx)];
+                resid[yy * 4 + xx] = px - pp;
+            }
+        }
+        wblocks[blk] = fwd_core(&resid);
+        dc_vals[DC_RASTER[blk]] = wblocks[blk][0];
+    }
+    let dc_had = hadamard4(&dc_vals);
+    let qbits = 15 + qp / 6;
+    let rem = (qp % 6) as usize;
+    let fq = qbits + 2;
+    let f = (1i64 << fq) / 3;
+    let mut dc_z = [0i32; 16];
+    for i in 0..16 {
+        let mf = MF[rem][0] as i64;
+        let v = dc_had[i] as i64;
+        let zz = ((v.abs() * mf + f) >> fq) as i32;
+        dc_z[i] = if v < 0 { -zz } else { zz };
+    }
+    let dc_deq = hadamard4(&dc_z);
+    let mut dc_recon = [0i32; 16];
+    let shift = qp / 6;
+    for i in 0..16 {
+        let vv = V[rem][0];
+        if shift >= 6 {
+            dc_recon[i] = (dc_deq[i] * vv) << (shift - 2);
+        } else {
+            dc_recon[i] = (dc_deq[i] * vv * 16 + (1 << (5 - shift))) >> (6 - shift);
+        }
+    }
+
+    let mut ac_z: [[i32; 16]; 16] = [[0; 16]; 16];
+    let mut ac_recon: [[i32; 16]; 16] = [[0; 16]; 16];
+    let mut cbp_luma_nonzero = false;
+    for blk in 0..16 {
+        let mut wq = [0i32; 16];
+        let mut z = [0i32; 16];
+        for i in 1..16 {
+            let cl = pos_class(i);
+            let mf = MF[rem][cl] as i64;
+            let wv = wblocks[blk][i] as i64;
+            let f_ac = (1i64 << qbits) / 3;
+            let zz = ((wv.abs() * mf + f_ac) >> qbits) as i32;
+            z[i] = if wv < 0 { -zz } else { zz };
+            if z[i] != 0 {
+                cbp_luma_nonzero = true;
+            }
+        }
+        ac_z[blk] = z;
+        for i in 1..16 {
+            let cl = pos_class(i);
+            let vv = V[rem][cl];
+            if shift >= 4 {
+                wq[i] = (z[i] * vv) << shift;
+            } else {
+                wq[i] = (z[i] * vv * 16 + (1 << (3 - shift))) >> (4 - shift);
+            }
+        }
+        wq[0] = dc_recon[DC_RASTER[blk]];
+        ac_recon[blk] = inv_core(&wq);
+    }
+
+    let mut recon = [0u8; 256];
+    for blk in 0..16 {
+        let (bx, by) = BLK_XY[blk];
+        for yy in 0..4 {
+            for xx in 0..4 {
+                let v = pred16[(by + yy) * 16 + (bx + xx)] + ac_recon[blk][yy * 4 + xx];
+                recon[(by + yy) * 16 + (bx + xx)] = v.clamp(0, 255) as u8;
+            }
+        }
+    }
+    I16Luma { recon, mode, dc_z, ac_z, cbp_luma_flag: if cbp_luma_nonzero { 1 } else { 0 } }
+}
+
+/// Emit one I_16x16 macroblock (header + residual) into `bw`, updating the nC
+/// TotalCoeff grids. Shared by the I_16x16-only path and the adaptive path.
+#[allow(clippy::too_many_arguments)]
+fn emit_mb_i16(
+    bw: &mut BitWriter, i16: &I16Luma, cm: &ChromaMb,
+    nz_luma: &mut [i32], lw4: usize, nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize,
+    mbx: usize, mby: usize,
+) {
+    let cbp_chroma: u32 = if cm.cbp_chroma_ac { 2 } else { 1 };
+    let mb_type = 1 + i16.mode as u32 + 4 * cbp_chroma + 12 * i16.cbp_luma_flag;
+    bw.ue(mb_type);
+    bw.ue(0); // intra_chroma_pred_mode = DC
+    bw.se(0); // mb_qp_delta = 0
+    let mut cav = Cavlc { bw };
+    let nc_dc = luma_nc(nz_luma, lw4, mbx, mby, 0);
+    let dc_scan: Vec<i32> = ZZ4.iter().map(|&i| i16.dc_z[i]).collect();
+    cav.block(&dc_scan, nc_dc);
+    if i16.cbp_luma_flag == 1 {
+        for blk in 0..16 {
+            let nc = luma_nc(nz_luma, lw4, mbx, mby, blk);
+            let ac_scan: Vec<i32> = ZZ4.iter().skip(1).map(|&i| i16.ac_z[blk][i]).collect();
+            let tc = cav.block(&ac_scan, nc);
+            set_luma_nz(nz_luma, lw4, mbx, mby, blk, tc as i32);
+        }
+    } else {
+        for blk in 0..16 {
+            set_luma_nz(nz_luma, lw4, mbx, mby, blk, 0);
+        }
+    }
+    emit_chroma_residual(&mut cav, cm, cbp_chroma, nz_cb, nz_cr, cw4, mbx, mby);
+}
+
+/// Emit one I_4x4 (I_NxN) macroblock (header + per-block mode signalling +
+/// residual) into `bw`, updating the nC grids and the frame-wide `mode_grid`.
+#[allow(clippy::too_many_arguments)]
+fn emit_mb_i4x4(
+    bw: &mut BitWriter, luma: &crate::h264_i4x4::I4x4Luma, cbp_luma: u32, cm: &ChromaMb,
+    nz_luma: &mut [i32], lw4: usize, mode_grid: &mut [i32],
+    nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize, mbx: usize, mby: usize,
+) {
+    let cbp_chroma: u32 = if cm.cbp_chroma_ac { 2 } else { 1 };
+    let cbp = cbp_luma | (cbp_chroma << 4);
+    bw.ue(0); // mb_type = 0 → I_NxN
+    for blk in 0..16 {
+        let (bx, by) = BLK_XY[blk];
+        let fx = mbx * 4 + bx / 4;
+        let fy = mby * 4 + by / 4;
+        let pred_mode = if fx == 0 || fy == 0 {
+            2
+        } else {
+            mode_grid[fy * lw4 + (fx - 1)].min(mode_grid[(fy - 1) * lw4 + fx])
+        };
+        let actual = luma.modes[blk] as i32;
+        if actual == pred_mode {
+            bw.put_flag(true);
+        } else {
+            bw.put_flag(false);
+            let rem = if actual < pred_mode { actual } else { actual - 1 };
+            bw.put_bits(rem as u32, 3);
+        }
+        mode_grid[fy * lw4 + fx] = actual;
+    }
+    bw.ue(0); // intra_chroma_pred_mode = DC
+    bw.ue(crate::h264_i4x4::intra4x4_cbp_to_golomb(cbp as u8));
+    if cbp > 0 {
+        bw.se(0); // mb_qp_delta = 0
+    }
+    let mut cav = Cavlc { bw };
+    for r in 0..4 {
+        if cbp_luma & (1 << r) != 0 {
+            for k in 0..4 {
+                let blk = r * 4 + k;
+                let nc = luma_nc(nz_luma, lw4, mbx, mby, blk);
+                let scan: Vec<i32> = ZZ4.iter().map(|&i| luma.coeffs[blk][i]).collect();
+                let tc = cav.block(&scan, nc);
+                set_luma_nz(nz_luma, lw4, mbx, mby, blk, tc as i32);
+            }
+        } else {
+            for k in 0..4 {
+                set_luma_nz(nz_luma, lw4, mbx, mby, r * 4 + k, 0);
+            }
+        }
+    }
+    emit_chroma_residual(&mut cav, cm, cbp_chroma, nz_cb, nz_cr, cw4, mbx, mby);
+}
+
+/// Emit the chroma DC + (conditionally) AC residual — identical for both MB
+/// types. Updates the chroma nC grids.
+#[allow(clippy::too_many_arguments)]
+fn emit_chroma_residual(
+    cav: &mut Cavlc, cm: &ChromaMb, cbp_chroma: u32,
+    nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize, mbx: usize, mby: usize,
+) {
+    for pi in 0..2 {
+        cav.block(&cm.planes[pi].0, -1);
+    }
+    if cbp_chroma == 2 {
+        for pi in 0..2 {
+            let grid: &mut [i32] = if pi == 0 { nz_cb } else { nz_cr };
+            for sb in 0..4 {
+                let nc = chroma_ac_nc(grid, cw4, mbx, mby, sb);
+                let ac_scan: Vec<i32> =
+                    ZZ4.iter().skip(1).map(|&i| cm.planes[pi].1[sb][i]).collect();
+                let tc = cav.block(&ac_scan, nc);
+                set_chroma_ac_nz(grid, cw4, mbx, mby, sb, tc as i32);
+            }
+        }
+    } else {
+        for grid in [&mut *nz_cb, &mut *nz_cr] {
+            for sb in 0..4 {
+                set_chroma_ac_nz(grid, cw4, mbx, mby, sb, 0);
+            }
+        }
+    }
+}
+
+/// Snapshot a rectangular block of grid cells (for the adaptive rate trial,
+/// which mutates the nC/mode grids then restores them).
+fn snap_rect(grid: &[i32], w: usize, x0: usize, y0: usize, bw: usize, bh: usize) -> Vec<i32> {
+    let mut out = Vec::with_capacity(bw * bh);
+    for gy in y0..y0 + bh {
+        for gx in x0..x0 + bw {
+            out.push(grid[gy * w + gx]);
+        }
+    }
+    out
+}
+fn restore_rect(grid: &mut [i32], w: usize, x0: usize, y0: usize, bw: usize, bh: usize, saved: &[i32]) {
+    let mut k = 0;
+    for gy in y0..y0 + bh {
+        for gx in x0..x0 + bw {
+            grid[gy * w + gx] = saved[k];
+            k += 1;
+        }
+    }
+}
+
+/// Standard H.264 SSD-domain Lagrange multiplier for intra mode decision
+/// (`λ = 0.85 · 2^((QP−12)/3)`). The free-energy weight on rate vs distortion.
+fn rdo_lambda(qp: i32) -> f64 {
+    0.85 * 2f64.powf((qp as f64 - 12.0) / 3.0)
 }
 
 // ── I_16x16 luma prediction (H.264 8.3.3): modes 0=V 1=H 2=DC 3=Plane ──
