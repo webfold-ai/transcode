@@ -109,6 +109,70 @@ pub fn sequence_header_obu(w: u32, h: u32) -> Vec<u8> {
     wrap_obu(OBU_SEQUENCE_HEADER, &bw.into_rbsp())
 }
 
+/// Write the `uncompressed_header` (5.9.2) for a reduced-still-picture
+/// KEY_FRAME into `bw` (no byte alignment — caller aligns, then appends tile
+/// data). Filters are all off (loop-filter levels 0, cdef strengths 0,
+/// restoration off) so the decoded frame equals our reconstruction, exactly as
+/// the H.264 path disables deblocking. `base_q_idx` is the frame quantiser.
+/// Geometry/flag choices match libaom's still-picture defaults so the bytes are
+/// verifiable byte-for-byte.
+pub fn write_frame_header(bw: &mut BitWriter, _w: u32, _h: u32, base_q_idx: u8) {
+    // (reduced) frame_type=KEY_FRAME, show_frame=1, error_resilient_mode=1 — none coded
+    bw.put_flag(false); // disable_cdf_update = 0
+    bw.put_flag(false); // allow_screen_content_tools = 0
+    // frame_size_override=0 (reduced), order_hint absent, refresh=allFrames — none coded
+    // frame_size(): override 0 + superres disabled → no bits
+    bw.put_flag(false); // render_and_frame_size_different = 0
+    // allow_intrabc absent (screen_content_tools=0); disable_frame_end_update_cdf=1 (reduced)
+
+    // tile_info() — single 64×64 tile for a ≤64×64 frame
+    bw.put_flag(true); // uniform_tile_spacing_flag = 1 (no increments: maxLog2Tiles=0)
+
+    // quantization_params()
+    bw.put_bits(base_q_idx as u32, 8); // base_q_idx
+    bw.put_flag(false); // DeltaQYDc: delta_coded = 0
+    bw.put_flag(false); // DeltaQUDc: delta_coded = 0  (NumPlanes>1, separate_uv_delta_q=0)
+    bw.put_flag(false); // DeltaQUAc: delta_coded = 0
+    bw.put_flag(false); // using_qmatrix = 0
+
+    // segmentation_params()
+    bw.put_flag(false); // segmentation_enabled = 0
+
+    // delta_q_params() (base_q_idx>0 ⇒ flag coded); delta_lf_params skipped when 0
+    bw.put_flag(false); // delta_q_present = 0
+
+    // loop_filter_params() (not CodedLossless, not intrabc ⇒ coded) — levels 0 = off
+    bw.put_bits(0, 6); // loop_filter_level[0] = 0
+    bw.put_bits(0, 6); // loop_filter_level[1] = 0
+    // level[0]||level[1] == 0 ⇒ level[2],[3] not coded
+    bw.put_bits(0, 3); // loop_filter_sharpness = 0
+    bw.put_flag(true); // loop_filter_delta_enabled = 1 (matches libaom; harmless at level 0)
+    bw.put_flag(false); // loop_filter_delta_update = 0
+
+    // cdef_params() (enable_cdef=1 ⇒ coded) — strengths 0 = off
+    bw.put_bits(2, 2); // cdef_damping_minus_3 = 2 (damping 5)
+    bw.put_bits(0, 2); // cdef_bits = 0 → one strength set
+    bw.put_bits(0, 4); // cdef_y_pri_strength = 0
+    bw.put_bits(0, 2); // cdef_y_sec_strength = 0
+    bw.put_bits(0, 4); // cdef_uv_pri_strength = 0
+    bw.put_bits(0, 2); // cdef_uv_sec_strength = 0
+
+    // lr_params() — enable_restoration=0 ⇒ nothing
+    // read_tx_mode()
+    bw.put_flag(false); // tx_mode_select = 0 → TX_MODE_LARGEST
+    // frame_reference_mode / skip_mode_params — intra, nothing
+    bw.put_flag(false); // reduced_tx_set = 0
+    // global_motion / film_grain — nothing
+}
+
+/// The byte-aligned frame header (for verification / standalone inspection).
+pub fn frame_header_bytes(w: u32, h: u32, base_q_idx: u8) -> Vec<u8> {
+    let mut bw = BitWriter::new();
+    write_frame_header(&mut bw, w, h, base_q_idx);
+    bw.align_zero(); // byte_alignment() — zeros, since tile data follows in OBU_FRAME
+    bw.into_rbsp()
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests — byte-exact vs libaom + uleb128 round-trip
 // ═══════════════════════════════════════════════════════════════════════════
@@ -149,6 +213,14 @@ mod tests {
         // First OBUs: 12 00 | 0a 06 18 15 7f fd a0 08
         let expected = vec![0x0a, 0x06, 0x18, 0x15, 0x7f, 0xfd, 0xa0, 0x08];
         assert_eq!(sequence_header_obu(64, 64), expected, "seq header must match libaom byte-for-byte");
+    }
+
+    #[test]
+    fn frame_header_64x64_q128_matches_libaom() {
+        // Reference: bytes 0..7 of the OBU_FRAME payload from the same libaom
+        // still-picture (after `32 09`): 18 00 00 00 50 00 00, then tile data.
+        let expected = vec![0x18, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00];
+        assert_eq!(frame_header_bytes(64, 64, 128), expected, "frame header must match libaom");
     }
 
     #[test]
