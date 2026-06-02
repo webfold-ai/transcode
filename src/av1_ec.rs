@@ -149,6 +149,22 @@ impl Writer {
         self.bool(b & 1 == 1, 16384);
     }
 
+    /// Adaptive boolean against a 2-entry CDF `[icdf, count]` — dav1d
+    /// `decode_bool_adapt`. Distinct from `symbol(_,_,2)`: the bool range split
+    /// uses a single `EC_MIN_PROB`, and the adaptation rate is `4 + (count>>4)`.
+    /// Used for AV1's skip, all_zero (txb_skip), and most binary flags.
+    pub fn bool_adapt(&mut self, val: bool, cdf: &mut [u16; 2]) {
+        self.bool(val, cdf[0]);
+        let count = cdf[1];
+        let rate = 4 + (count >> 4) as u32;
+        if val {
+            cdf[0] += (CDF_PROB_TOP - cdf[0]) >> rate;
+        } else {
+            cdf[0] -= cdf[0] >> rate;
+        }
+        cdf[1] = count + (count < 32) as u16;
+    }
+
     /// Encode `bits` literal bits of `s`, MSB first (each equiprobable).
     pub fn literal(&mut self, bits: u8, s: u32) {
         for i in (0..bits).rev() {
@@ -277,6 +293,20 @@ impl<'a> Reader<'a> {
         v += ret * (r - 2 * v);
         self.norm(dif, v);
         ret == 0
+    }
+
+    /// Adaptive boolean (mirrors [`Writer::bool_adapt`]).
+    pub fn bool_adapt(&mut self, cdf: &mut [u16; 2]) -> bool {
+        let val = self.bool(cdf[0]);
+        let count = cdf[1];
+        let rate = 4 + (count >> 4) as u32;
+        if val {
+            cdf[0] += (CDF_PROB_TOP - cdf[0]) >> rate;
+        } else {
+            cdf[0] -= cdf[0] >> rate;
+        }
+        cdf[1] = count + (count < 32) as u16;
+        val
     }
 
     pub fn bit(&mut self) -> u32 {
