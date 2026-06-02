@@ -9,6 +9,7 @@ pub mod av1_dct;
 pub mod av1_ec;
 pub mod av1_intra;
 pub mod av1_obu;
+pub mod av1_frame;
 pub mod codec;
 pub mod flac;
 pub mod h264;
