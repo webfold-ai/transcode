@@ -130,7 +130,9 @@ impl Writer {
     pub fn symbol(&mut self, s: usize, cdf: &mut [u16], nsymbs: usize) {
         let fl = if s > 0 { cdf[s - 1] } else { CDF_PROB_TOP };
         let fh = cdf[s];
-        let nms = (nsymbs + 1 - s) as u16; // cdf.len() - s, cdf.len()=nsymbs+1
+        // dav1d's n_symbols = symbol_count − 1; the boundary for symbol s uses
+        // EC_MIN_PROB·(n_symbols − s), i.e. nms−1 = nsymbs−1−s ⇒ nms = nsymbs − s.
+        let nms = (nsymbs - s) as u16;
         self.store(fl, fh, nms);
         update_cdf(cdf, s, nsymbs);
     }
@@ -270,7 +272,7 @@ impl<'a> Reader<'a> {
             u = v;
             v = r * (cdf[val] as u32 >> EC_PROB_SHIFT);
             v >>= 7 - EC_PROB_SHIFT;
-            v += EC_MIN_PROB * (nsymbs - val) as u32;
+            v += EC_MIN_PROB * (nsymbs - 1 - val) as u32; // dav1d n_symbols = count−1
             if c >= v {
                 break;
             }
