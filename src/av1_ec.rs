@@ -311,6 +311,12 @@ impl<'a> Reader<'a> {
         val
     }
 
+    /// Current normalized range (∈ [0x8000, 0xFFFF]) — matches dav1d's `s->rng`,
+    /// for diffing per-symbol decode traces against dav1d.
+    pub fn rng(&self) -> u32 {
+        self.rng
+    }
+
     pub fn bit(&mut self) -> u32 {
         // equiprobable: dav1d decode_bool_equi
         let r = self.rng;

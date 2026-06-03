@@ -79,6 +79,112 @@ fn encode_tile_flat_dc() -> Vec<u8> {
     w.finish()
 }
 
+// Coefficient CDFs for the nonzero luma-DC path (dav1d cdf.c, qctx=3),
+// all verified bit-for-bit against dav1d's per-symbol rng trace.
+const EOB_BIN_1024_L: [u16; 10] =
+    [6698, 8334, 11961, 15762, 20186, 23862, 27434, 29326, 31082, 32050]; // [chroma=0]
+const EOB_BASE_TOK_64: [u16; 2] = [12358, 24977]; // eob_base_tok[ctx=4][0][0]
+const BR_TOK_64: [u16; 3] = [12162, 18785, 22648]; // br_tok[imin(ctx,3)=3][0][0]
+const DC_SIGN_L: u16 = 16000; // dc_sign[chroma=0][ctx=0]
+
+/// Encode the AV1 `hi_tok` (br_tok) for a coefficient level `dc_tok ∈ 3..=15`:
+/// the inverse of dav1d `decode_hi_tok` — repeated base-3 symbols where 3 means
+/// "continue", over one adapting br_tok CDF.
+fn encode_hi_tok(w: &mut Writer, br: &mut [u16], dc_tok: u32) {
+    if dc_tok <= 5 {
+        w.symbol((dc_tok - 3) as usize, br, 4);
+        return;
+    }
+    w.symbol(3, br, 4);
+    if dc_tok <= 8 {
+        w.symbol((dc_tok - 6) as usize, br, 4);
+        return;
+    }
+    w.symbol(3, br, 4);
+    if dc_tok <= 11 {
+        w.symbol((dc_tok - 9) as usize, br, 4);
+        return;
+    }
+    w.symbol(3, br, 4);
+    w.symbol((dc_tok - 12) as usize, br, 4);
+}
+
+/// Encode AV1's Exp-Golomb residual (inverse of dav1d `read_golomb`): `len`
+/// equiprobable zero bits, then `val = x+1` in `len+1` bits MSB-first (the
+/// leading 1 is the run terminator). Used for coefficient levels ≥ 15.
+fn encode_golomb(w: &mut Writer, x: u32) {
+    let val = x + 1;
+    let len = 31 - val.leading_zeros();
+    for _ in 0..len {
+        w.bit(0);
+    }
+    for i in (0..=len).rev() {
+        w.bit((val >> i) & 1);
+    }
+}
+
+/// Symbol-code the 64×64 superblock with a single nonzero luma DC coefficient
+/// (level `dc_tok ≥ 1`, `dc_sign` true = negative), chroma all-zero. This is the
+/// arm-③ generative path: the coefficient value is regenerated from the entropy
+/// state, never stored. Order matches dav1d decode_coefs exactly.
+fn encode_tile_dc(dc_tok: u32, dc_sign: bool) -> Vec<u8> {
+    let mut w = Writer::new();
+    let mut part = cdf(&PARTITION_64_CTX0);
+    w.symbol(0, &mut part, 10); // PARTITION_NONE
+    let mut skip = bcdf(MB_SKIP_C0);
+    w.bool_adapt(false, &mut skip); // skip = 0
+    let mut ym = cdf(&KF_YMODE_00);
+    w.symbol(0, &mut ym, 13); // y_mode = DC
+    let mut uv = cdf(&UV_MODE_DC);
+    w.symbol(0, &mut uv, 13); // uv_mode = DC
+    // luma residual: all_zero = 0 (has the DC coeff)
+    let mut luma_az = bcdf(COEF_SKIP_TX64_C0);
+    w.bool_adapt(false, &mut luma_az);
+    // eob_pt = 0 (dc-only)
+    let mut eob = cdf(&EOB_BIN_1024_L);
+    w.symbol(0, &mut eob, 11);
+    // eob_base_tok: tok_br = min(dc_tok-1, 2); ≥3 escapes to hi_tok
+    let mut et = cdf(&EOB_BASE_TOK_64);
+    if dc_tok <= 2 {
+        w.symbol((dc_tok - 1) as usize, &mut et, 3);
+    } else {
+        w.symbol(2, &mut et, 3);
+        let mut br = cdf(&BR_TOK_64);
+        encode_hi_tok(&mut w, &mut br, dc_tok.min(15));
+        if dc_tok >= 15 {
+            encode_golomb(&mut w, dc_tok - 15); // hi_tok saturates at 15 ⇒ golomb tail
+        }
+    }
+    // dc_sign
+    let mut ds = bcdf(DC_SIGN_L);
+    w.bool_adapt(dc_sign, &mut ds);
+    // chroma all_zero = 1 (U then V, shared adapting CDF)
+    let mut chroma_az = bcdf(COEF_SKIP_TX32_C7);
+    w.bool_adapt(true, &mut chroma_az);
+    w.bool_adapt(true, &mut chroma_az);
+    w.finish()
+}
+
+/// Assemble a full AV1 elementary stream around a coded tile.
+fn assemble_keyframe(tile: Vec<u8>) -> Vec<u8> {
+    let (w, h, q) = (64u32, 64u32, 128u8);
+    let mut out = temporal_delimiter();
+    out.extend_from_slice(&sequence_header_obu(w, h));
+    let mut fhdr = BitWriter::new();
+    write_frame_header(&mut fhdr, w, h, q);
+    fhdr.align_zero();
+    let mut payload = fhdr.into_rbsp();
+    payload.extend_from_slice(&tile);
+    out.extend_from_slice(&wrap_obu(OBU_FRAME, &payload));
+    out
+}
+
+/// A 64×64 still with a uniform luma DC offset (chroma neutral). `dc_tok` is the
+/// quantised DC level, `dc_sign` its sign. Decodes to a uniform grey ≠ 128.
+pub fn encode_dc_keyframe_64(dc_tok: u32, dc_sign: bool) -> Vec<u8> {
+    assemble_keyframe(encode_tile_dc(dc_tok, dc_sign))
+}
+
 /// Encode a 64×64 flat-grey still image as a complete AV1 elementary stream
 /// (temporal delimiter + sequence header + OBU_FRAME). Decodable by dav1d/ffmpeg.
 pub fn encode_flat_keyframe_64() -> Vec<u8> {
