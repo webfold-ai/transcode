@@ -41,3 +41,17 @@ fn dc_coeff_decodes_to_offset_grey() {
         assert_eq!(set.len(), 1, "dc_tok={tok}: frame must be uniform, got {} values", set.len());
     }
 }
+
+#[test]
+fn ac_coeff_decodes_nonuniform() {
+    if !ffmpeg() { eprintln!("SKIP: no ffmpeg"); return; }
+    // DC + one vertical-AC coeff ⇒ the decoded luma must NOT be flat.
+    let y = decode_y(&transcode::av1_frame::encode_ac_keyframe_64(1, false, 1, false), "ac11");
+    let distinct: std::collections::HashSet<_> = y.iter().collect();
+    assert!(distinct.len() >= 2, "AC coeff must produce spatial variation, got {} value(s)", distinct.len());
+    // a few level/sign variants must all decode without error
+    for (d, dn, a, an) in [(1u32,false,1u32,false),(2,true,1,false),(1,false,2,true),(2,true,2,true)] {
+        let s = transcode::av1_frame::encode_ac_keyframe_64(d, dn, a, an);
+        let _ = decode_y(&s, &format!("ac{d}{}{a}{}", dn as u8, an as u8)); // asserts ffmpeg success inside
+    }
+}

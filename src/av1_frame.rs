@@ -165,6 +165,53 @@ fn encode_tile_dc(dc_tok: u32, dc_sign: bool) -> Vec<u8> {
     w.finish()
 }
 
+const EOB_BASE_TOK_64_C1: [u16; 2] = [31331, 32385]; // eob_base_tok[4][0][ctx=1] (eob=1)
+const BASE_TOK_64_C0: [u16; 3] = [4137, 10847, 15682]; // base_tok[4][0][ctx=0] (2D-class DC)
+
+/// Symbol-code the 64×64 superblock with TWO luma coefficients: the DC (scan[0])
+/// and one AC at scan[1] (the first vertical frequency, rc=32). Levels 1–2 each
+/// (no hi-token), signs free. eob (last scan index) = 1. The 2D-class DC uses a
+/// fixed context 0 (NOT get_lo_ctx — that's only the middle AC coeffs). Verified
+/// against dav1d's per-symbol rng trace; decodes to a spatially-varying frame.
+fn encode_tile_dc_ac(dc_lvl: u32, dc_neg: bool, ac_lvl: u32, ac_neg: bool) -> Vec<u8> {
+    assert!((1..=2).contains(&dc_lvl) && (1..=2).contains(&ac_lvl));
+    let mut w = Writer::new();
+    let mut part = cdf(&PARTITION_64_CTX0);
+    w.symbol(0, &mut part, 10);
+    let mut skip = bcdf(MB_SKIP_C0);
+    w.bool_adapt(false, &mut skip);
+    let mut ym = cdf(&KF_YMODE_00);
+    w.symbol(0, &mut ym, 13);
+    let mut uv = cdf(&UV_MODE_DC);
+    w.symbol(0, &mut uv, 13);
+    // luma residual, eob (last scan index) = 1
+    let mut az = bcdf(COEF_SKIP_TX64_C0);
+    w.bool_adapt(false, &mut az); // all_zero = 0
+    let mut eb = cdf(&EOB_BIN_1024_L);
+    w.symbol(1, &mut eb, 11); // eob_pt = 1
+    // eob coeff (scan[1]) via eob_base_tok[ctx=1]; tok = ac_lvl (≤2 ⇒ no hi)
+    let mut et = cdf(&EOB_BASE_TOK_64_C1);
+    w.symbol((ac_lvl - 1) as usize, &mut et, 3);
+    // DC (scan[0]) via base_tok[ctx=0]; tok = dc_lvl (≤2 ⇒ no hi)
+    let mut bt = cdf(&BASE_TOK_64_C0);
+    w.symbol(dc_lvl as usize, &mut bt, 3);
+    // signs: dc_sign (adaptive), then AC sign (equiprobable), in rc order
+    let mut ds = bcdf(DC_SIGN_L);
+    w.bool_adapt(dc_neg, &mut ds);
+    w.bit(ac_neg as u32);
+    // chroma all_zero
+    let mut cz = bcdf(COEF_SKIP_TX32_C7);
+    w.bool_adapt(true, &mut cz);
+    w.bool_adapt(true, &mut cz);
+    w.finish()
+}
+
+/// A 64×64 still with a DC + one vertical-AC luma coefficient — a spatially
+/// varying (non-flat) decodable AV1 frame.
+pub fn encode_ac_keyframe_64(dc_lvl: u32, dc_neg: bool, ac_lvl: u32, ac_neg: bool) -> Vec<u8> {
+    assemble_keyframe(encode_tile_dc_ac(dc_lvl, dc_neg, ac_lvl, ac_neg))
+}
+
 /// Assemble a full AV1 elementary stream around a coded tile.
 fn assemble_keyframe(tile: Vec<u8>) -> Vec<u8> {
     let (w, h, q) = (64u32, 64u32, 128u8);
