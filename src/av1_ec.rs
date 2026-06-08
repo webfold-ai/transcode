@@ -126,6 +126,11 @@ impl Writer {
         self.cnt = s;
     }
 
+    /// Current normalized range (for diffing encoder traces against dav1d).
+    pub fn rng(&self) -> u32 {
+        self.rng as u32
+    }
+
     /// Encode one symbol `s` against the adaptive `cdf` (AOM_ICDF, `nsymbs`).
     pub fn symbol(&mut self, s: usize, cdf: &mut [u16], nsymbs: usize) {
         let fl = if s > 0 { cdf[s - 1] } else { CDF_PROB_TOP };
@@ -336,6 +341,57 @@ impl<'a> Reader<'a> {
             v = (v << 1) | self.bit();
         }
         v
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Coder — the applicative over the entropy coder (THE only freedom).
+// A bitstream-syntax function is written ONCE generic over `Coder`; `Enc` (wraps
+// Writer) and `Dec` (wraps Reader) are the two interpretations. Each method
+// takes a `hint` (the value, used only by Enc) and returns the value (decoded by
+// Dec, == hint for Enc). Contexts depend only on already-coded values, which
+// both sides hold, so encode and decode CANNOT diverge — the encoder is the
+// decoder run backward (R(θ)⁻¹ = R(−θ); `/` its own inverse). This is the
+// `applicative_is_the_only_freedom` / arch.rs Backend pattern.
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub trait Coder {
+    /// Multi-symbol against an adaptive CDF. Enc emits `hint`; Dec decodes. Both return the value.
+    fn symbol(&mut self, cdf: &mut [u16], nsymbs: usize, hint: usize) -> usize;
+    /// Adaptive boolean.
+    fn bool_adapt(&mut self, cdf: &mut [u16; 2], hint: bool) -> bool;
+    /// Equiprobable bit.
+    fn bit(&mut self, hint: u32) -> u32;
+}
+
+/// Encode applicative — interprets the syntax as writing `hint` values.
+pub struct Enc<'a>(pub &'a mut Writer);
+impl Coder for Enc<'_> {
+    fn symbol(&mut self, cdf: &mut [u16], nsymbs: usize, hint: usize) -> usize {
+        self.0.symbol(hint, cdf, nsymbs);
+        hint
+    }
+    fn bool_adapt(&mut self, cdf: &mut [u16; 2], hint: bool) -> bool {
+        self.0.bool_adapt(hint, cdf);
+        hint
+    }
+    fn bit(&mut self, hint: u32) -> u32 {
+        self.0.bit(hint);
+        hint
+    }
+}
+
+/// Decode applicative — interprets the syntax as reading values (hints ignored).
+pub struct Dec<'a, 'd>(pub &'a mut Reader<'d>);
+impl Coder for Dec<'_, '_> {
+    fn symbol(&mut self, cdf: &mut [u16], nsymbs: usize, _hint: usize) -> usize {
+        self.0.symbol(cdf, nsymbs)
+    }
+    fn bool_adapt(&mut self, cdf: &mut [u16; 2], _hint: bool) -> bool {
+        self.0.bool_adapt(cdf)
+    }
+    fn bit(&mut self, _hint: u32) -> u32 {
+        self.0.bit()
     }
 }
 
