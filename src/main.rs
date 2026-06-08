@@ -519,6 +519,57 @@ fn main() {
         }
         return;
     }
+    // Encode a directory of PNG frames (sorted by name) to an H.264/MP4 video. Usage:
+    //   --pngseq-to-mp4 <dir> <out.mp4> [fps] [qp]   (fps default 24, qp default 26)
+    if args.len() >= 4 && args[1] == "--pngseq-to-mp4" {
+        let fps: u32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(24);
+        let qp: i32 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(26);
+        let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&args[2])
+            .unwrap_or_else(|e| {
+                eprintln!("read dir {}: {e}", args[2]);
+                std::process::exit(1);
+            })
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("png"))
+            .collect();
+        paths.sort();
+        if paths.is_empty() {
+            eprintln!("no .png frames in {}", args[2]);
+            std::process::exit(1);
+        }
+        let mut frames: Vec<Vec<u8>> = Vec::with_capacity(paths.len());
+        let (mut w, mut h) = (0u32, 0u32);
+        for p in &paths {
+            let bytes = std::fs::read(p).unwrap_or_else(|e| {
+                eprintln!("read {}: {e}", p.display());
+                std::process::exit(1);
+            });
+            let img = transcode::png::decode(&bytes).unwrap_or_else(|e| {
+                eprintln!("png decode {}: {e}", p.display());
+                std::process::exit(1);
+            });
+            w = img.width;
+            h = img.height;
+            frames.push(img.pixels);
+        }
+        match transcode::mp4::encode_rgba_h264_qp(&frames, w, h, fps, qp) {
+            Ok(mp4) => {
+                std::fs::write(&args[3], &mp4).unwrap_or_else(|e| {
+                    eprintln!("write {}: {e}", args[3]);
+                    std::process::exit(1);
+                });
+                println!(
+                    "{} frames {}x{} @ {}fps → {} : {} bytes (qp={})",
+                    frames.len(), w, h, fps, args[3], mp4.len(), qp,
+                );
+            }
+            Err(e) => {
+                eprintln!("h264 encode: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.len() == 4 && args[1] == "--from-mp3" {
         match mp3::decode_pcm(&std::fs::read(&args[2]).unwrap_or_default()) {
             Ok((s, rate, ch)) => {
