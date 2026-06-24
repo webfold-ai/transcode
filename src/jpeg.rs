@@ -197,10 +197,10 @@ impl HuffDec {
                     let shift = 8 - l;
                     for j in 0..cnt {
                         let c = (code + j as i32) as usize;
-                        let sym = vals[k + j] as u16;
+                        let sym = *vals.get(k + j).unwrap_or(&0) as u16;
                         let entry = ((l as u16) << 8) | sym;
                         let base = c << shift;
-                        for p in base..base + (1 << shift) {
+                        for p in base..(base + (1 << shift)).min(fast.len()) { // bound malformed codes
                             fast[p] = entry;
                         }
                     }
@@ -492,6 +492,7 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
     let mut width = 0usize;
     let mut height = 0usize;
     let mut restart_interval = 0usize;
+    let mut adobe: Option<u8> = None; // APP14 Adobe colour transform (2 = YCCK) for 4-component CMYK
 
     if data.len() < 2 || data[0] != 0xFF || data[1] != 0xD8 {
         return Err("JPEG: missing SOI".into());
@@ -518,6 +519,16 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 }
                 height = u16::from_be_bytes([data[p + 3], data[p + 4]]) as usize;
                 width = u16::from_be_bytes([data[p + 5], data[p + 6]]) as usize;
+                // Anti-bomb (the streaming-law bound): a JPEG cannot decode more 8×8 blocks than its
+                // entropy stream has bytes (≥ ~1 byte/MCU). Reject attacker-inflated dimensions in
+                // O(1) — a compare, never an allocation sized by the declared (untrusted) header.
+                if width == 0 || height == 0 { return Err("JPEG: zero dimension".into()); }
+                // Two bounds, both O(1): (1) a generous data-relative check (a JPEG block needs
+                // entropy; ≥ ~1 byte per 16 blocks rejects truncated bombs) and (2) the absolute 100MP
+                // backstop (≤ 400 MiB RGBA) — no real document image approaches either.
+                let blocks = (width / 8 + 1) as u64 * (height / 8 + 1) as u64;
+                if blocks > data.len() as u64 * 16 { return Err("JPEG: dimensions exceed data".into()); }
+                if (width as u64) * (height as u64) > 100_000_000 { return Err("JPEG: exceeds 100MP".into()); }
                 let nc = data[p + 7] as usize;
                 comps.clear();
                 for i in 0..nc {
@@ -540,10 +551,12 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
                 let mut q = p + 2;
                 let end = p + len;
+                if end > data.len() { return Err("JPEG: truncated DHT".into()); } // bound the segment
                 while q < end {
                     let tc_th = data[q];
                     let class = tc_th >> 4;
                     let id = (tc_th & 0x0F) as usize;
+                    if id >= 4 { return Err("JPEG: bad Huffman table id".into()); } // index is 0..3
                     q += 1;
                     let mut bits = [0u8; 16];
                     let mut total = 0usize;
@@ -552,6 +565,7 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                         total += *b as usize;
                         q += 1;
                     }
+                    if q + total > data.len() { return Err("JPEG: truncated DHT values".into()); }
                     let vals = data[q..q + total].to_vec();
                     q += total;
                     let h = HuffDec::build(&bits, &vals);
@@ -568,10 +582,12 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
                 let mut q = p + 2;
                 let end = p + len;
+                if end > data.len() { return Err("JPEG: truncated DQT".into()); } // bound the segment
                 while q < end {
                     let pq_tq = data[q];
                     let prec = pq_tq >> 4;
                     let id = (pq_tq & 0x0F) as usize;
+                    if id >= 4 { return Err("JPEG: bad quant table id".into()); } // index is 0..3
                     q += 1;
                     let mut table = [0u16; 64];
                     for k in 0..64 {
@@ -608,11 +624,18 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 // entropy-coded data begins at p
                 return decode_scan(
                     data, p, width, height, &mut comps, &qtables, &dc_huff, &ac_huff,
-                    restart_interval, &basis,
+                    restart_interval, adobe, &basis,
                 );
             }
             0xD8 => {}                              // SOI (shouldn't recur)
             0x01 | 0xD0..=0xD7 => {}                // TEM / stray RST
+            0xEE => {
+                // APP14 Adobe: the transform byte (0 = CMYK/RGB, 1 = YCbCr, 2 = YCCK) — needed to
+                // colour-convert 4-component (CMYK) JPEGs, which Adobe also stores inverted.
+                let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
+                if len >= 14 && &data[p + 2..p + 7] == b"Adobe" { adobe = Some(data[p + 13]); }
+                p += len;
+            }
             _ => {
                 // skip any other marker segment with a length
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
@@ -633,6 +656,7 @@ fn decode_scan(
     dc_huff: &[Option<HuffDec>],
     ac_huff: &[Option<HuffDec>],
     restart_interval: usize,
+    adobe: Option<u8>,
     basis: &[[f32; 8]; 8],
 ) -> Result<Image, String> {
     let hmax = comps.iter().map(|c| c.h).max().unwrap_or(1) as usize;
@@ -660,13 +684,11 @@ fn decode_scan(
                 }
             }
             for (ci, c) in comps.iter_mut().enumerate() {
-                let dch = dc_huff[c.td as usize]
-                    .as_ref()
+                let dch = dc_huff.get(c.td as usize).and_then(|x| x.as_ref())
                     .ok_or("JPEG: missing DC table")?;
-                let ach = ac_huff[c.ta as usize]
-                    .as_ref()
+                let ach = ac_huff.get(c.ta as usize).and_then(|x| x.as_ref())
                     .ok_or("JPEG: missing AC table")?;
-                let qt = &qtables[c.tq as usize];
+                let qt = qtables.get(c.tq as usize).ok_or("JPEG: missing Q table")?;
                 for by in 0..c.v as usize {
                     for bx in 0..c.h as usize {
                         let mut coef = [0.0f32; 64];
@@ -748,6 +770,41 @@ fn decode_scan(
                 pixels[di] = g;
                 pixels[di + 1] = g;
                 pixels[di + 2] = g;
+                pixels[di + 3] = 255;
+            }
+        }
+    } else if ncomp == 4 {
+        // 4-component CMYK / YCCK (Adobe). Channels are stored inverted (Adobe convention =
+        // white-minus-ink); for transform==2 the first three are YCCK (YCbCr of the CMY). Recover
+        // (R,G,B) from the first three, then multiply by K — RGB = C'·K'/255 — the libjpeg path.
+        let sxm = |c: &Component| -> Vec<usize> {
+            (0..width).map(|x| (x * c.h as usize / hmax).min(c.bw - 1)).collect()
+        };
+        let sym = |c: &Component| -> Vec<usize> {
+            (0..height).map(|y| (y * c.v as usize / vmax).min(c.bh - 1)).collect()
+        };
+        let maps: Vec<(Vec<usize>, Vec<usize>)> = comps.iter().map(|c| (sxm(c), sym(c))).collect();
+        let ycck = adobe == Some(2);
+        for y in 0..height {
+            for x in 0..width {
+                let s = |i: usize| -> i32 {
+                    let (xm, ym) = &maps[i];
+                    comps[i].plane[ym[y] * comps[i].bw + xm[x]] as i32
+                };
+                let (c0, c1, c2, k) = (s(0), s(1), s(2), s(3));
+                // For YCCK the first three YCbCr→RGB *to CMY directly*; for plain CMYK they are CMY.
+                // Final RGB = (255 − CMY)·K/255 (K = the stored 4th channel, Adobe convention).
+                let (cy, mg, ye) = if ycck {
+                    (cl(c0 + cr_r[c2 as usize]),
+                     cl(c0 - cb_g[c1 as usize] - cr_g[c2 as usize]),
+                     cl(c0 + cb_b[c1 as usize]))
+                } else {
+                    (c0 as u8, c1 as u8, c2 as u8)
+                };
+                let di = (y * width + x) * 4;
+                pixels[di] = ((255 - cy as i32) * k / 255) as u8;
+                pixels[di + 1] = ((255 - mg as i32) * k / 255) as u8;
+                pixels[di + 2] = ((255 - ye as i32) * k / 255) as u8;
                 pixels[di + 3] = 255;
             }
         }
