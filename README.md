@@ -1,134 +1,102 @@
 # transcode
 
-A sovereign, ffmpeg-free audio codec crate — pure Rust, **zero external dependencies**
-(std only). Decodes and encodes real-world compressed audio and transcodes PCM
-(resample / bit-depth / channel remap) without linking ffmpeg, symphonia, or any C
-library.
+**Zero-dependency PDF image decoder.** Extract and decode image streams from PDF files.
+Pure Rust, std only — no libc, no ffmpeg, no C libraries.
 
-Carved out of the sanguine repo so it can be reused as a standalone crate by the
-audio front-ends in the peregrine STT stack (it is how LibriSpeech `.flac` is read
-into PCM for log-mel feature extraction).
+Used by [pdffold](https://github.com/Ptyktos/pdffold) for image extraction during
+PDF-to-markdown conversion. Sovereign from-scratch JPEG and PNG codecs handle the
+image formats embedded in PDF content streams.
 
-## What it does
-
-| Capability | Detail |
-|---|---|
-| **Decode** | FLAC, MP3 (Layer III), AAC-LC (ADTS), RIFF WAV — Opus is partial (see below) |
-| **Encode** | FLAC, AAC-LC, RIFF WAV, SLAC (lossless container) |
-| **Resample** | polyphase rational L/M, fixed-point Q15 windowed-sinc lowpass |
-| **Bit depth** | 8 / 16 / 24 / 32-bit int, 32-bit float — any → any |
-| **Channels** | mono ↔ stereo (down-mix average, up-mix duplicate) |
-
-**Per-format status, what each piece means, and the roadmap → [ROADMAP.md](ROADMAP.md).**
-Short version: WAV, FLAC, SLAC and the resampler are fully round-tripping; MP3 decodes
-(no encoder); AAC-LC round-trips but is slow; **Opus is entropy-layer + container
-parsing only — no full frame→PCM decode yet.**
-
-All samples are carried internally as canonical 32-bit signed full-scale fixed-point
-(`i32`, ±2³¹); every depth maps in by a shift, so resampling and mixing happen at full
-precision regardless of in/out depth. The resampler is the phase-aligned polyphase
-collapse (`step_by(L)`, no zero-MACs), each tap a Q15 multiply-accumulate summed in
-`i64`.
-
-Does **not** read NIST SPHERE (`.WAV` from TIMIT etc.) — that container is read by the
-STT harness itself, since it is raw PCM behind an ASCII header.
-
-## Library API
-
-Add as a path dependency:
+## Quick start
 
 ```toml
 [dependencies]
-transcode = { path = "../../transcode" }
+transcode = "0.1"
 ```
 
-Decoders return `(samples, rate, channels, …)`; the FLAC decoder also returns bits per
-sample:
+```bash
+cargo build --release
+```
+
+Decode images from a PDF via the CLI:
+
+```bash
+# Extract + decode all JPEG and PNG image streams to RGBA
+transcode extract in.pdf --out-dir ./frames
+
+# Pipe raw image stream bytes from a PDF object
+cat obj-stream.bin | transcode decode --fmt auto > decoded.rgba
+```
+
+## Features
+
+- **JPEG decode** — baseline sequential DCT, Huffman entropy coding (no arithmetic,
+  no progressive). Grayscale + YCbCr with arbitrary sampling factors (4:2:0, 4:2:2,
+  4:4:4), restart markers. Output is canonical 8-bit RGBA.
+- **PNG decode** — all color types (grayscale, RGB, palette, gray+alpha, RGBA),
+  8-bit depth, non-interlaced. Full DEFLATE inflate (stored / fixed-Huffman /
+  dynamic-Huffman) + zlib wrapper + scanline filters.
+- **Zero dependencies** — from-scratch implementations of JPEG DCT/Huffman, PNG
+  DEFLATE/CRC-32/Adler-32. No libpng, libjpeg, zlib, or system libraries.
+- **Container probes** — parse stream headers without full decode (dimensions,
+  color type, compression params).
+- **RGBA canonical output** — both codecs produce the same `Image` struct (`Vec<u8>`
+  RGBA pixels, width, height), so downstream consumers handle one format.
+
+## How it works
+
+PDF files embed image streams as compressed object data, typically JPEG DCT or PNG
+deflate. transcode provides the decode engines for both formats:
+
+- **JPEG path:** Parse SOI–EOI markers, extract quantization + Huffman tables,
+  decode MCU blocks via separable DCT, upsample chroma components to full
+  resolution, output RGBA.
+- **PNG path:** Parse chunk stream (IHDR → IDAT → IEND), inflate DEFLATE-compressed
+  scanline data (dynamic or fixed Huffman), reverse the per-scanline filter (none,
+  sub, up, average, Paeth), assemble RGBA pixels.
+
+Both codecs are standalone implementations — no wrappers around system libraries,
+no FFI, no `build.rs` probes. The JPEG decoder uses a clean direct separable float
+DCT (AAN/FFT fast path available as a drop-in); the PNG decoder includes a complete
+DEFLATE inflate with LZ77 hash-chain match finding.
+
+```
+PDF object ──▶ JPEG marker scan ──▶ Huffman decode ──▶ iDCT ──▶ RGBA pixels
+             or
+             ▶ PNG chunk parse ──▶ DEFLATE inflate ──▶ unfilter ──▶ RGBA pixels
+```
+
+## Library API
 
 ```rust
-// FLAC → 32-bit canonical samples (the STT audio front-end path)
-let (samples, rate, channels, bps) = transcode::flac::decode(&bytes)?; // (Vec<i32>, u32, u16, u32)
+// Decode JPEG bytes → RGBA image
+let img = transcode::jpeg::decode(&bytes)?;
 
-// MP3 → interleaved i16 PCM
-let (pcm, rate, channels) = transcode::mp3::decode_pcm(&bytes)?;        // (Vec<i16>, u32, u16)
-let (pcm, rate)           = transcode::mp3::decode_pcm_mono(&bytes)?;   // (Vec<i16>, u32)
-
-// AAC-LC (ADTS) → interleaved i16 PCM
-let (pcm, rate, channels) = transcode::aac::decode_pcm(&bytes)?;        // (Vec<i16>, u32, u16)
-
-// Encoders
-let flac = transcode::flac::encode(&samples, rate, channels, bps);     // Vec<u8>
-let aac  = transcode::aac::encode_pcm(&pcm, rate, channels, kbps);     // Vec<u8>
-
-// SLAC lossless container
-let slac = transcode::codec::encode(&samples, rate, channels, fmt_code, shift);
-let (samples, rate, channels, fmt_code) = transcode::codec::decode(&slac)?;
-
-// Container probes (no full decode)
-let info = transcode::opus::parse(&bytes)?;
-let info = transcode::aac::parse(&bytes)?;
-let info = transcode::mp3::parse(&bytes)?;
+// Decode PNG bytes → RGBA image
+let img = transcode::png::decode(&bytes)?;
 ```
 
-Modules: `flac`, `mp3` (+ `mp3_tables`), `aac` (+ `aac_tables`), `opus` (+ `opus_tables`),
-`codec` (SLAC).
+Both return `Image { width: u32, height: u32, pixels: Vec<u8> }` where `pixels`
+is RGBA8, row-major, `width * height * 4` bytes.
 
-## CLI
+## Related Projects (Ptyktos ecosystem)
 
-```bash
-cargo build --release            # builds the `transcode` binary
-```
+- **[pdffold](https://github.com/Ptyktos/pdffold)** — PDF-to-markdown using transcode
+  for image stream extraction
+- **[swarm](https://github.com/TWN-Systems/swarm)** — swarm prediction via
+  stationary-phase collapse
+- **[talon](https://github.com/TWN-Systems/talon)** — mail-security adapter on the
+  same collapse engine
+- **[cerealize](https://github.com/TWN-Systems/collapse_wire)** — zero-dependency
+  Rust serialization via the x=B/U Null residual
+- **Sanguine** — the Lean proof corpus; the fixed-point kernels in this crate derive
+  from `proof/PolyphaseCollapse.lean` and `proof/IIRFilterCollapse.lean`
 
-Transcode a WAV (resample / re-depth / remap):
+Also from the fold-family: **[chunkfold](https://github.com/Ptyktos/chunkfold)**,
+**[textfold](https://github.com/Ptyktos/textfold)**,
+**[webfold](https://github.com/Ptyktos/webfold)**,
+**[sdirstat](https://github.com/Ptyktos/sdirstat)**.
 
-```bash
-transcode in.wav out.wav --rate 16000 --bits 16 --channels 1
-```
+## License
 
-Container conversions:
-
-```bash
-transcode --from-flac in.flac out.wav     transcode --to-flac in.wav out.flac
-transcode --from-mp3  in.mp3  out.wav
-transcode --from-aac  in.aac  out.wav     transcode --to-aac  in.wav out.aac [kbps]
-transcode --encode    in.wav  out.slac    transcode --decode  in.slac out.wav
-```
-
-Probe a stream without decoding:
-
-```bash
-transcode --mp3-info in.mp3      transcode --aac-info in.aac      transcode --opus-info in.opus
-```
-
-Generate a test tone, and run the self-tests:
-
-```bash
-transcode --gen tone.wav 16000 1000 0.5   # 16 kHz, 1 kHz tone, 0.5 s
-transcode --selftest                       # resample + bit-depth round-trip + channel remap
-transcode --codec-selftest                 # SLAC encode/decode round-trip
-transcode --bench 10                        # throughput + ratio benchmark on 10 s of audio
-```
-
-(Per-codec verification probes also exist: `--mp3-*`, `--aac-*`, `--opus-*`.)
-
-## Performance
-
-On a 13th Gen i5-1340P, single thread: FLAC, SLAC and the resampler run at
-**~1000–4000× realtime**; AAC-LC runs at **~656× realtime encode / ~372× decode** with
-closed-form rate control and an FFT-factored O(N log N) MDCT/IMDCT. In a wall-clock
-comparison against ffmpeg 7.1.4 on the same box, transcode is faster on FLAC (both
-directions) and on AAC encode; ffmpeg is ~1.7× faster on AAC decode. Full measured
-table, methodology, ffmpeg head-to-head, and caveats → [BENCHMARKS.md](BENCHMARKS.md).
-Reproduce with `cargo build --release && ./target/release/transcode --bench 10`.
-
-## Design notes
-
-The fixed-point kernels mirror the sanguine Lean proofs they were derived from:
-`proof/PolyphaseCollapse.lean` (the resampler's phase-aligned tap sum) and
-`proof/IIRFilterCollapse.lean` (the Q15 multiply-accumulate as discrete-applicative
-`ZmodMul`/`ZmodAdd`). Those proofs live in the sanguine repo; this crate is the
-standalone runtime.
-
-## License / provenance
-
-Sovereign from-scratch implementation — no third-party codec code. Internal TWN R&D.
+MIT
