@@ -1,5 +1,7 @@
 # transcode
 
+![transcode social preview](assets/social-card.png)
+
 **Zero-dependency PDF image decoder.** Extract and decode image streams from PDF files.
 Pure Rust, std only — no libc, no ffmpeg, no C libraries.
 
