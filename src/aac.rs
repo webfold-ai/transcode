@@ -1895,6 +1895,64 @@ pub fn encode_roundtrip_test() -> i32 {
     }
 }
 
+/// Split an ADTS AAC stream into raw access units and derive the
+/// AudioSpecificConfig that an MP4 `esds` descriptor needs.
+///
+/// ADTS carries its configuration in a 7-byte header on every frame; MP4 carries
+/// it once, out of band, and stores each access unit bare. So muxing ADTS into
+/// MP4 is exactly this: drop the per-frame headers, and hoist what they said into
+/// one AudioSpecificConfig.
+///
+/// Returns `(raw_frames, audio_specific_config)`. The config is the 2-byte
+/// ISO/IEC 14496-3 form: audioObjectType(5) | samplingFrequencyIndex(4) |
+/// channelConfiguration(4) | frameLengthFlag(1) | dependsOnCoreCoder(1) |
+/// extensionFlag(1).
+pub fn adts_to_raw_frames(adts: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<u8>), String> {
+    let mut frames = Vec::new();
+    let mut cfg: Option<(u8, u8, u8)> = None; // (object_type, sf_index, channels)
+    let mut i = 0usize;
+
+    while i + 7 <= adts.len() {
+        if adts[i] != 0xFF || (adts[i + 1] & 0xF0) != 0xF0 {
+            return Err(format!("AAC: no ADTS syncword at byte {i}"));
+        }
+        // protection_absent == 0 means a 2-byte CRC follows the 7-byte header.
+        let header_len = if adts[i + 1] & 0x01 == 1 { 7 } else { 9 };
+        let frame_len = (((adts[i + 3] & 0x03) as usize) << 11)
+            | ((adts[i + 4] as usize) << 3)
+            | ((adts[i + 5] as usize) >> 5);
+        if frame_len < header_len || i + frame_len > adts.len() {
+            return Err(format!(
+                "AAC: ADTS frame at {i} claims {frame_len} bytes, past end of stream"
+            ));
+        }
+        if cfg.is_none() {
+            // profile is objectType-1 in ADTS; AAC-LC is profile 1 / objectType 2.
+            let object_type = (adts[i + 2] >> 6) + 1;
+            let sf_index = (adts[i + 2] >> 2) & 0x0F;
+            let channels = ((adts[i + 2] & 0x01) << 2) | (adts[i + 3] >> 6);
+            cfg = Some((object_type, sf_index, channels));
+        }
+        frames.push(adts[i + header_len..i + frame_len].to_vec());
+        i += frame_len;
+    }
+
+    if i != adts.len() {
+        return Err(format!(
+            "AAC: {} trailing bytes after the last ADTS frame",
+            adts.len() - i
+        ));
+    }
+    let Some((object_type, sf_index, channels)) = cfg else {
+        return Err("AAC: empty ADTS stream".into());
+    };
+    let asc = vec![
+        (object_type << 3) | (sf_index >> 1),
+        ((sf_index & 1) << 7) | (channels << 3),
+    ];
+    Ok((frames, asc))
+}
+
 /// Encode interleaved 16-bit PCM to an ADTS AAC-LC stream at ~`bitrate_kbps`.
 pub fn encode_pcm(samples: &[i16], rate: u32, channels: u16, bitrate_kbps: u32) -> Vec<u8> {
     let sr_index = SAMPLE_RATES.iter().position(|&r| r == rate).unwrap_or(4);

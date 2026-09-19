@@ -240,3 +240,93 @@ fn report_sizes() {
         }
     }
 }
+
+// ── A/V mux: the muxed file must be readable by a real demuxer ──────────────
+// The unit tests in src/mp4.rs check our own box tree against our own
+// assumptions. This checks it against ffmpeg, which is the only opinion that
+// matters for a container format.
+
+#[test]
+fn av_mux_decodes_both_streams_in_ffmpeg() {
+    if !ffmpeg_available() {
+        eprintln!("skip: ffmpeg not installed");
+        return;
+    }
+    let (w, h, fps) = (64u32, 64u32, 10u32);
+    let frames: Vec<Vec<u8>> = (0..20)
+        .map(|t| {
+            let mut px = vec![0u8; (w * h * 4) as usize];
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let i = (y * w as usize + x) * 4;
+                    px[i] = (x * 4 + t * 8) as u8;
+                    px[i + 1] = (y * 4) as u8;
+                    px[i + 2] = (t * 12) as u8;
+                    px[i + 3] = 255;
+                }
+            }
+            px
+        })
+        .collect();
+    let rate = 44100u32;
+    let pcm: Vec<i16> = (0..rate as usize * 2)
+        .map(|i| (((i % 128) as i16) - 64) * 200)
+        .collect();
+
+    let mp4 = transcode::mp4::encode_rgba_h264_aac(
+        &frames,
+        w,
+        h,
+        fps,
+        transcode::h264::DEFAULT_QP,
+        &pcm,
+        rate,
+        1,
+        96,
+    )
+    .expect("A/V mux");
+
+    let path = std::env::temp_dir().join("transcode_av_mux_test.mp4");
+    std::fs::write(&path, &mp4).expect("write mp4");
+
+    let out = Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-show_entries", "stream=codec_type,codec_name",
+            "-of", "csv=p=0",
+        ])
+        .arg(&path)
+        .output()
+        .expect("spawn ffprobe");
+    assert!(
+        out.status.success(),
+        "ffprobe rejected the file: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let streams = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        streams.contains("h264") && streams.contains("video"),
+        "no H.264 video stream found: {streams}"
+    );
+    assert!(
+        streams.contains("aac") && streams.contains("audio"),
+        "no AAC audio stream found: {streams}"
+    );
+
+    // Demux and decode both streams for real — a container can list streams it
+    // cannot actually deliver.
+    for (kind, args) in [
+        ("video", ["-map", "0:v:0", "-f", "rawvideo"]),
+        ("audio", ["-map", "0:a:0", "-f", "s16le"]),
+    ] {
+        let status = Command::new("ffmpeg")
+            .arg("-v").arg("error")
+            .arg("-i").arg(&path)
+            .args(args)
+            .arg("-y").arg("/dev/null")
+            .status()
+            .expect("spawn ffmpeg");
+        assert!(status.success(), "ffmpeg failed to decode the {kind} stream");
+    }
+    let _ = std::fs::remove_file(&path);
+}
