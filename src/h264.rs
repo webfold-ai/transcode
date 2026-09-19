@@ -159,6 +159,37 @@ pub fn encode_mp4_track_qp(
     height: u32,
     qp: i32,
 ) -> Result<(Vec<u8>, Vec<u8>, Vec<Vec<u8>>), String> {
+    encode_mp4_track_qp_threads(frames, width, height, qp, default_encode_threads())
+}
+
+/// Threads to encode on by default: one per core less one, so a long encode
+/// does not take the whole machine.
+pub fn default_encode_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1).max(1))
+        .unwrap_or(1)
+}
+
+/// As [`encode_mp4_track_qp`] with an explicit thread count.
+///
+/// Every sample this encoder produces is an IDR — an intra frame that refers to
+/// nothing outside itself — so frames have no encode-order dependency and the
+/// work divides cleanly across cores. The only per-frame input besides the
+/// pixels is the frame number, which is derived from the index rather than a
+/// running counter, so a frame encodes to the same bytes no matter which thread
+/// takes it or when. Output is byte-identical to the serial path; this is purely
+/// a wall-clock change.
+///
+/// Workers claim indices from a shared counter rather than taking fixed ranges,
+/// so a frame that is expensive to encode (dense detail costs more bits and more
+/// time) does not strand one worker after the others are done.
+pub fn encode_mp4_track_qp_threads(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    qp: i32,
+    threads: usize,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<Vec<u8>>), String> {
     if frames.is_empty() {
         return Err("H264: no frames".into());
     }
@@ -166,15 +197,63 @@ pub fn encode_mp4_track_qp(
         return Err("H264: zero dimension".into());
     }
     let need = (width * height * 4) as usize;
-    let sps = nal_unit(3, 7, &crate::h264bits::build_sps(width, height));
-    let pps = nal_unit(3, 8, &crate::h264bits::build_pps());
-    let mut samples = Vec::with_capacity(frames.len());
     for (i, f) in frames.iter().enumerate() {
         if f.len() < need {
             return Err(format!("H264: frame {i} buffer too small"));
         }
-        let slice = crate::h264_intra::encode_idr_adaptive(width, height, f, qp, i as u32)?;
-        samples.push(nal_unit(3, 5, &slice));
+    }
+
+    let sps = nal_unit(3, 7, &crate::h264bits::build_sps(width, height));
+    let pps = nal_unit(3, 8, &crate::h264bits::build_pps());
+
+    let encode_one = |i: usize| -> Result<Vec<u8>, String> {
+        let slice =
+            crate::h264_intra::encode_idr_adaptive(width, height, &frames[i], qp, i as u32)?;
+        Ok(nal_unit(3, 5, &slice))
+    };
+
+    let threads = threads.max(1).min(frames.len());
+    if threads == 1 {
+        let mut samples = Vec::with_capacity(frames.len());
+        for i in 0..frames.len() {
+            samples.push(encode_one(i)?);
+        }
+        return Ok((sps, pps, samples));
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let next = AtomicUsize::new(0);
+    let count = frames.len();
+    let next = &next;
+    let encode_one = &encode_one;
+
+    let collected: Vec<Result<Vec<(usize, Vec<u8>)>, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(move || {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= count {
+                            break;
+                        }
+                        mine.push((i, encode_one(i)?));
+                    }
+                    Ok(mine)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err("H264: encode worker panicked".into())))
+            .collect()
+    });
+
+    let mut samples: Vec<Vec<u8>> = vec![Vec::new(); count];
+    for batch in collected {
+        for (i, sample) in batch? {
+            samples[i] = sample;
+        }
     }
     Ok((sps, pps, samples))
 }
@@ -465,5 +544,59 @@ mod tests {
         // after 4-byte start + 1 header byte: 00 00 03 00 01
         let body = &out[5..];
         assert_eq!(body, &[0, 0, 3, 0, 1]);
+    }
+}
+
+#[cfg(test)]
+mod parallel_tests {
+    use super::*;
+
+    fn frame(w: u32, h: u32, t: u32) -> Vec<u8> {
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                px[i] = (x.wrapping_mul(3).wrapping_add(t * 7)) as u8;
+                px[i + 1] = (y.wrapping_mul(5)) as u8;
+                px[i + 2] = (x ^ y).wrapping_add(t) as u8;
+                px[i + 3] = 255;
+            }
+        }
+        px
+    }
+
+    #[test]
+    fn parallel_encode_is_byte_identical_to_serial() {
+        let (w, h) = (64, 48);
+        let frames: Vec<Vec<u8>> = (0..12).map(|t| frame(w, h, t)).collect();
+        let serial = encode_mp4_track_qp_threads(&frames, w, h, DEFAULT_QP, 1).unwrap();
+        for threads in [2, 4, 8] {
+            let par = encode_mp4_track_qp_threads(&frames, w, h, DEFAULT_QP, threads).unwrap();
+            assert_eq!(serial.0, par.0, "SPS differs at {threads} threads");
+            assert_eq!(serial.1, par.1, "PPS differs at {threads} threads");
+            assert_eq!(
+                serial.2, par.2,
+                "samples differ at {threads} threads — encoding is not order-independent"
+            );
+        }
+    }
+
+    #[test]
+    fn more_threads_than_frames_is_safe() {
+        let (w, h) = (32, 32);
+        let frames: Vec<Vec<u8>> = (0..3).map(|t| frame(w, h, t)).collect();
+        let a = encode_mp4_track_qp_threads(&frames, w, h, DEFAULT_QP, 64).unwrap();
+        let b = encode_mp4_track_qp_threads(&frames, w, h, DEFAULT_QP, 1).unwrap();
+        assert_eq!(a.2.len(), 3);
+        assert_eq!(a.2, b.2);
+    }
+
+    #[test]
+    fn undersized_frame_is_rejected_before_any_work() {
+        let (w, h) = (32, 32);
+        let mut frames: Vec<Vec<u8>> = (0..4).map(|t| frame(w, h, t)).collect();
+        frames[2].truncate(10);
+        let err = encode_mp4_track_qp_threads(&frames, w, h, DEFAULT_QP, 4).unwrap_err();
+        assert!(err.contains("frame 2"), "expected the bad index named: {err}");
     }
 }
