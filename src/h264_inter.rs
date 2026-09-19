@@ -111,6 +111,131 @@ pub fn encode_ipppp_with_recon(
     Ok((out, recons))
 }
 
+/// Encode a sequence in which some frames are known to repeat the previous one.
+///
+/// `plan[i]` names which entry of `distinct` frame `i` shows. Where a frame
+/// repeats its predecessor the slice is an all-skip P-frame: the decoder copies
+/// the reference, which is exactly right *because the frames are identical*.
+///
+/// This is the same machinery as [`encode_ipppp`], driven by knowledge instead
+/// of by measurement. That encoder compares consecutive frames and re-keys a
+/// whole IDR whenever anything moved, so a composition where something changes
+/// most of the time gains nothing from it. A caller that already knows which
+/// frames repeat — because it generated them and can see that no property
+/// changed — spends no time comparing pixels and no bits on the repeats.
+///
+/// Returns the per-frame NAL units (no start codes, ready for MP4 sample
+/// framing) and the indices of the sync samples, which are the IDRs. Only
+/// those may be listed in `stss`; marking a P-frame as a sync sample tells a
+/// decoder it can start there, and it cannot.
+pub fn encode_planned_samples(
+    distinct: &[Vec<u8>],
+    plan: &[usize],
+    width: u32,
+    height: u32,
+    qp: i32,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<Vec<u8>>, Vec<u32>), String> {
+    if plan.is_empty() {
+        return Err("H264-inter: empty plan".into());
+    }
+    if plan.iter().any(|&p| p >= distinct.len()) {
+        return Err("H264-inter: plan references a frame that was not rendered".into());
+    }
+    let total_mbs = width.div_ceil(16) * height.div_ceil(16);
+    let sps = crate::h264::nal_unit_pub(3, 7, &build_sps(width, height));
+    let pps = crate::h264::nal_unit_pub(3, 8, &build_pps());
+
+    let mut samples = Vec::with_capacity(plan.len());
+    let mut sync = Vec::new();
+    let mut idr_id = 0u32;
+    let mut frame_num = 0u32;
+    let mut prev: Option<usize> = None;
+
+    for (i, &which) in plan.iter().enumerate() {
+        if prev == Some(which) {
+            // Identical to the frame before it: copy the reference, no residual.
+            frame_num = (frame_num + 1) & 0xF;
+            let poc = (frame_num * 2) & 0xF;
+            let slice = build_pskip_slice(total_mbs, qp, frame_num, poc);
+            samples.push(crate::h264::nal_unit_pub(2, 1, &slice));
+        } else {
+            // New content: a fresh IDR, which also resets frame_num.
+            frame_num = 0;
+            let (slice, _) =
+                encode_idr_intra_recon(width, height, &distinct[which], qp, idr_id)?;
+            samples.push(crate::h264::nal_unit_pub(3, 5, &slice));
+            sync.push(i as u32 + 1); // stss is 1-based
+            idr_id = idr_id.wrapping_add(1);
+        }
+        prev = Some(which);
+    }
+    Ok((sps, pps, samples, sync))
+}
+
+/// Assemble a planned stream from *already-encoded* IDR samples.
+///
+/// The split matters for memory. [`encode_planned_samples`] takes raw frames,
+/// so a caller must hold every distinct frame — at 1080p that is 8.3 MB each
+/// and gigabytes for a real composition. An all-skip P-slice, however, contains
+/// no pixel data whatsoever: it is a slice header saying "copy the reference".
+/// So the pixels can be encoded and dropped one at a time, in parallel, and the
+/// skips synthesised afterwards from the plan alone.
+///
+/// `idr` holds one encoded IDR NAL per distinct frame, `plan[i]` names which
+/// one output frame `i` shows. Returns the per-frame samples and the 1-based
+/// sync-sample indices.
+pub fn assemble_planned(
+    idr: &[Vec<u8>],
+    plan: &[usize],
+    width: u32,
+    height: u32,
+    qp: i32,
+) -> Result<(Vec<Vec<u8>>, Vec<u32>), String> {
+    if plan.is_empty() {
+        return Err("H264-inter: empty plan".into());
+    }
+    if plan.iter().any(|&p| p >= idr.len()) {
+        return Err("H264-inter: plan references a frame that was not encoded".into());
+    }
+    let total_mbs = width.div_ceil(16) * height.div_ceil(16);
+    let mut samples = Vec::with_capacity(plan.len());
+    let mut sync = Vec::new();
+    let mut frame_num = 0u32;
+    let mut prev: Option<usize> = None;
+
+    for (i, &which) in plan.iter().enumerate() {
+        if prev == Some(which) {
+            frame_num = (frame_num + 1) & 0xF;
+            let poc = (frame_num * 2) & 0xF;
+            samples.push(crate::h264::nal_unit_pub(
+                2,
+                1,
+                &build_pskip_slice(total_mbs, qp, frame_num, poc),
+            ));
+        } else {
+            // An IDR resets frame_num, which is why the skips that follow can
+            // be numbered without knowing anything about the pixels.
+            frame_num = 0;
+            samples.push(idr[which].clone());
+            sync.push(i as u32 + 1);
+        }
+        prev = Some(which);
+    }
+    Ok((samples, sync))
+}
+
+/// Encode one frame as an IDR sample, ready for [`assemble_planned`].
+pub fn encode_idr_sample(
+    frame: &[u8],
+    width: u32,
+    height: u32,
+    qp: i32,
+    idr_id: u32,
+) -> Result<Vec<u8>, String> {
+    let (slice, _) = encode_idr_intra_recon(width, height, frame, qp, idr_id)?;
+    Ok(crate::h264::nal_unit_pub(3, 5, &slice))
+}
+
 /// Convenience: IPPPP stream without the reconstruction side-channel.
 pub fn encode_ipppp(
     frames: &[Vec<u8>],

@@ -966,6 +966,25 @@ pub fn write_h264_mp4<W: std::io::Write>(
     height: u32,
     fps: u32,
 ) -> Result<u64, String> {
+    write_h264_mp4_sync(out, sps, pps, samples, None, width, height, fps)
+}
+
+/// As [`write_h264_mp4`], with an explicit list of sync samples (1-based).
+///
+/// An all-intra stream makes every sample a sync sample, and that is what
+/// `None` writes. A stream containing P-frames must list only its keyframes:
+/// `stss` tells a decoder where it may begin, and a P-frame depends on its
+/// reference, so naming one is an invitation to decode garbage after a seek.
+pub fn write_h264_mp4_sync<W: std::io::Write>(
+    out: &mut W,
+    sps: &[u8],
+    pps: &[u8],
+    samples: &[Vec<u8>],
+    sync: Option<&[u32]>,
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<u64, String> {
     if samples.is_empty() {
         return Err("MP4: no samples".into());
     }
@@ -990,7 +1009,7 @@ pub fn write_h264_mp4<W: std::io::Write>(
             offsets.push(at as u32);
             at += *s as u64;
         }
-        moov_for_video(&entry, &sizes, &offsets, width, height, fps)
+        moov_for_video(&entry, &sizes, &offsets, sync, width, height, fps)
     };
 
     // First build: placeholder offsets, to learn moov's length.
@@ -1027,6 +1046,7 @@ fn moov_for_video(
     sample_entry: &[u8],
     sizes: &[u32],
     offsets: &[u32],
+    sync: Option<&[u32]>,
     width: u32,
     height: u32,
     fps: u32,
@@ -1070,9 +1090,19 @@ fn moov_for_video(
     let stco = boxed(b"stco", &fullbox_body(0, 0, &stco_rest));
 
     let mut stss_rest = Vec::new();
-    u32be(&mut stss_rest, n);
-    for i in 1..=n {
-        u32be(&mut stss_rest, i);
+    match sync {
+        Some(list) => {
+            u32be(&mut stss_rest, list.len() as u32);
+            for i in list {
+                u32be(&mut stss_rest, *i);
+            }
+        }
+        None => {
+            u32be(&mut stss_rest, n);
+            for i in 1..=n {
+                u32be(&mut stss_rest, i);
+            }
+        }
     }
     let stss = boxed(b"stss", &fullbox_body(0, 0, &stss_rest));
 

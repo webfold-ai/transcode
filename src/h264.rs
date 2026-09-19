@@ -126,6 +126,12 @@ fn nal_unit(nal_ref_idc: u8, nal_unit_type: u8, rbsp: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `nal_unit` for other modules in this crate that emit MP4 samples rather
+/// than an Annex-B stream.
+pub fn nal_unit_pub(nal_ref_idc: u8, nal_unit_type: u8, rbsp: &[u8]) -> Vec<u8> {
+    nal_unit(nal_ref_idc, nal_unit_type, rbsp)
+}
+
 /// Wrap an RBSP in an Annex-B NAL: 4-byte start code + NAL unit.
 fn emit_nal(out: &mut Vec<u8>, nal_ref_idc: u8, nal_unit_type: u8, rbsp: &[u8]) {
     out.extend_from_slice(&[0, 0, 0, 1]);
