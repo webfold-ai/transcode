@@ -20,6 +20,7 @@ pub mod h264bits;
 pub mod h264_i4x4;
 pub mod h264_inter;
 pub mod h264_intra;
+pub mod image;
 pub mod jpeg;
 pub mod mjpeg;
 pub mod mkv;
@@ -30,3 +31,7 @@ pub mod opus;
 pub mod opus_tables;
 pub mod preview;
 pub mod png;
+
+/// Re-exported so `image::ssim` and friends can name it as `crate::Image`,
+/// which is how they were written before this module was lost in the split.
+pub use png::Image;
