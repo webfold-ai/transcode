@@ -330,3 +330,67 @@ fn av_mux_decodes_both_streams_in_ffmpeg() {
     }
     let _ = std::fs::remove_file(&path);
 }
+
+// ── streaming writer ───────────────────────────────────────────────────────
+
+#[test]
+fn streamed_mp4_decodes_and_matches_the_in_memory_muxer() {
+    if !ffmpeg_available() {
+        eprintln!("skip: ffmpeg not installed");
+        return;
+    }
+    let (w, h, fps) = (64u32, 64u32, 10u32);
+    let frames: Vec<Vec<u8>> = (0..12)
+        .map(|t| {
+            let mut px = vec![0u8; (w * h * 4) as usize];
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let i = (y * w as usize + x) * 4;
+                    px[i] = (x * 3 + t * 9) as u8;
+                    px[i + 1] = (y * 5) as u8;
+                    px[i + 2] = ((x ^ y) + t) as u8;
+                    px[i + 3] = 255;
+                }
+            }
+            px
+        })
+        .collect();
+    let (sps, pps, samples) =
+        transcode::h264::encode_mp4_track_qp(&frames, w, h, transcode::h264::DEFAULT_QP).unwrap();
+
+    let mut streamed = Vec::new();
+    let n = transcode::mp4::write_h264_mp4(&mut streamed, &sps, &pps, &samples, w, h, fps).unwrap();
+    assert_eq!(n as usize, streamed.len(), "reported length must match output");
+
+    let in_memory = transcode::mp4::mux_h264(&sps, &pps, &samples, w, h, fps).unwrap();
+    // The two are not byte-identical and are not meant to be: the in-memory
+    // muxer groups `fps` samples per chunk while the streaming writer emits one
+    // sample per chunk, which trades a larger `stco` for a smaller `stsc`. What
+    // must match is the payload and what a decoder reads back out.
+    let payload: usize = samples.iter().map(|s| s.len() + 4).sum();
+    assert!(streamed.len() > payload, "output must contain the samples");
+    assert!(
+        (streamed.len() as i64 - in_memory.len() as i64).abs() < 1024,
+        "layouts differ by chunking only: {} vs {}",
+        streamed.len(),
+        in_memory.len()
+    );
+
+    let path = std::env::temp_dir().join("transcode_streamed.mp4");
+    std::fs::write(&path, &streamed).unwrap();
+    let out = Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-count_frames",
+            "-show_entries", "stream=codec_name,width,height,nb_read_frames",
+            "-of", "csv=p=0",
+        ])
+        .arg(&path)
+        .output()
+        .expect("spawn ffprobe");
+    assert!(out.status.success(), "ffprobe rejected the streamed file");
+    let info = String::from_utf8_lossy(&out.stdout);
+    assert!(info.contains("h264"), "no h264 stream: {info}");
+    assert!(info.contains("12"), "expected 12 decodable frames: {info}");
+    let _ = std::fs::remove_file(&path);
+}

@@ -936,3 +936,235 @@ mod tests {
         assert!(find(b"avcC"), "missing avcC config box");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Streaming writer
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Write an H.264 `.mp4` without ever holding the whole file in memory.
+///
+/// [`mux_h264`] returns a `Vec<u8>` of the finished file, so a twenty-second
+/// 1080p render holds the encoded stream twice — once as samples, once as the
+/// assembled result. This writes `ftyp` and `moov` first and then streams the
+/// samples straight through into `mdat`, so the peak is the sample list alone.
+///
+/// Putting `moov` ahead of `mdat` is also what "faststart" means: a reader
+/// learns the sample tables before it reaches the data, so playback can begin
+/// without seeking to the end of the file.
+///
+/// The circularity — `moov` holds absolute chunk offsets, which depend on how
+/// long `moov` itself is — is resolved by building it twice. Offsets are
+/// fixed-width, so the second build is byte-identical in length to the first;
+/// only the values differ. The assertion below states that invariant rather
+/// than trusting it.
+pub fn write_h264_mp4<W: std::io::Write>(
+    out: &mut W,
+    sps: &[u8],
+    pps: &[u8],
+    samples: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<u64, String> {
+    if samples.is_empty() {
+        return Err("MP4: no samples".into());
+    }
+    let entry = avc1_sample_entry(sps, pps, width, height)?;
+
+    // AVCC framing adds a 4-byte length prefix per sample; account for it in
+    // the sizes without materialising the framed copies.
+    let sizes: Vec<u32> = samples.iter().map(|s| (s.len() + 4) as u32).collect();
+
+    let mut ftyp_body = Vec::new();
+    ftyp_body.extend_from_slice(b"isom");
+    u32be(&mut ftyp_body, 0x200);
+    for brand in [b"isom", b"iso2", b"avc1", b"mp41"] {
+        ftyp_body.extend_from_slice(brand);
+    }
+    let ftyp = boxed(b"ftyp", &ftyp_body);
+
+    let build_moov = |mdat_payload_off: u64| -> Vec<u8> {
+        let mut offsets = Vec::with_capacity(sizes.len());
+        let mut at = mdat_payload_off;
+        for s in &sizes {
+            offsets.push(at as u32);
+            at += *s as u64;
+        }
+        moov_for_video(&entry, &sizes, &offsets, width, height, fps)
+    };
+
+    // First build: placeholder offsets, to learn moov's length.
+    let probe = build_moov(0);
+    let mdat_payload_off = (ftyp.len() + probe.len() + 8) as u64;
+    let moov = build_moov(mdat_payload_off);
+    assert_eq!(
+        probe.len(),
+        moov.len(),
+        "moov length must not depend on offset values"
+    );
+
+    let mdat_payload: u64 = sizes.iter().map(|s| *s as u64).sum();
+    let mdat_total = mdat_payload + 8;
+    if mdat_total > u32::MAX as u64 {
+        return Err("MP4: mdat exceeds 4 GB; a 64-bit box is not implemented".into());
+    }
+
+    out.write_all(&ftyp).map_err(|e| e.to_string())?;
+    out.write_all(&moov).map_err(|e| e.to_string())?;
+    out.write_all(&(mdat_total as u32).to_be_bytes())
+        .map_err(|e| e.to_string())?;
+    out.write_all(b"mdat").map_err(|e| e.to_string())?;
+    for s in samples {
+        out.write_all(&(s.len() as u32).to_be_bytes())
+            .map_err(|e| e.to_string())?;
+        out.write_all(s).map_err(|e| e.to_string())?;
+    }
+    Ok(ftyp.len() as u64 + moov.len() as u64 + mdat_total)
+}
+
+/// Build a `moov` for a single all-intra video track with explicit offsets.
+fn moov_for_video(
+    sample_entry: &[u8],
+    sizes: &[u32],
+    offsets: &[u32],
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Vec<u8> {
+    let fps = fps.max(1);
+    let n = sizes.len() as u32;
+    let media_duration = n;
+    let movie_duration = (n as u64 * MOVIE_TIMESCALE as u64 / fps as u64) as u32;
+
+    let mut stsd_rest = Vec::new();
+    u32be(&mut stsd_rest, 1);
+    stsd_rest.extend_from_slice(sample_entry);
+    let stsd = boxed(b"stsd", &fullbox_body(0, 0, &stsd_rest));
+
+    let mut stts_rest = Vec::new();
+    u32be(&mut stts_rest, 1);
+    u32be(&mut stts_rest, n);
+    u32be(&mut stts_rest, 1);
+    let stts = boxed(b"stts", &fullbox_body(0, 0, &stts_rest));
+
+    let mut stsc_rest = Vec::new();
+    u32be(&mut stsc_rest, 1);
+    u32be(&mut stsc_rest, 1);
+    u32be(&mut stsc_rest, 1);
+    u32be(&mut stsc_rest, 1);
+    let stsc = boxed(b"stsc", &fullbox_body(0, 0, &stsc_rest));
+
+    let mut stsz_rest = Vec::new();
+    u32be(&mut stsz_rest, 0);
+    u32be(&mut stsz_rest, n);
+    for s in sizes {
+        u32be(&mut stsz_rest, *s);
+    }
+    let stsz = boxed(b"stsz", &fullbox_body(0, 0, &stsz_rest));
+
+    let mut stco_rest = Vec::new();
+    u32be(&mut stco_rest, offsets.len() as u32);
+    for o in offsets {
+        u32be(&mut stco_rest, *o);
+    }
+    let stco = boxed(b"stco", &fullbox_body(0, 0, &stco_rest));
+
+    let mut stss_rest = Vec::new();
+    u32be(&mut stss_rest, n);
+    for i in 1..=n {
+        u32be(&mut stss_rest, i);
+    }
+    let stss = boxed(b"stss", &fullbox_body(0, 0, &stss_rest));
+
+    let mut stbl_body = Vec::new();
+    for b in [&stsd, &stts, &stsc, &stsz, &stco, &stss] {
+        stbl_body.extend_from_slice(b);
+    }
+    let stbl = boxed(b"stbl", &stbl_body);
+
+    let url = boxed(b"url ", &fullbox_body(0, 1, &[]));
+    let mut dref_rest = Vec::new();
+    u32be(&mut dref_rest, 1);
+    dref_rest.extend_from_slice(&url);
+    let dinf = boxed(b"dinf", &boxed(b"dref", &fullbox_body(0, 0, &dref_rest)));
+
+    let mut minf_body = Vec::new();
+    minf_body.extend_from_slice(&vmhd());
+    minf_body.extend_from_slice(&dinf);
+    minf_body.extend_from_slice(&stbl);
+    let minf = boxed(b"minf", &minf_body);
+
+    let mut mdhd_rest = Vec::new();
+    u32be(&mut mdhd_rest, 0);
+    u32be(&mut mdhd_rest, 0);
+    u32be(&mut mdhd_rest, fps);
+    u32be(&mut mdhd_rest, media_duration);
+    u16be(&mut mdhd_rest, 0x55C4);
+    u16be(&mut mdhd_rest, 0);
+    let mdhd = boxed(b"mdhd", &fullbox_body(0, 0, &mdhd_rest));
+
+    let mut hdlr_rest = Vec::new();
+    u32be(&mut hdlr_rest, 0);
+    hdlr_rest.extend_from_slice(b"vide");
+    for _ in 0..3 {
+        u32be(&mut hdlr_rest, 0);
+    }
+    hdlr_rest.extend_from_slice(b"VideoHandler\0");
+    let hdlr = boxed(b"hdlr", &fullbox_body(0, 0, &hdlr_rest));
+
+    let mut mdia_body = Vec::new();
+    mdia_body.extend_from_slice(&mdhd);
+    mdia_body.extend_from_slice(&hdlr);
+    mdia_body.extend_from_slice(&minf);
+    let mdia = boxed(b"mdia", &mdia_body);
+
+    let mut tkhd_rest = Vec::new();
+    u32be(&mut tkhd_rest, 0);
+    u32be(&mut tkhd_rest, 0);
+    u32be(&mut tkhd_rest, 1);
+    u32be(&mut tkhd_rest, 0);
+    u32be(&mut tkhd_rest, movie_duration);
+    for _ in 0..2 {
+        u32be(&mut tkhd_rest, 0);
+    }
+    u16be(&mut tkhd_rest, 0);
+    u16be(&mut tkhd_rest, 0);
+    u16be(&mut tkhd_rest, 0);
+    u16be(&mut tkhd_rest, 0);
+    for &v in &[0x0001_0000u32, 0, 0, 0, 0x0001_0000, 0, 0, 0, 0x4000_0000] {
+        u32be(&mut tkhd_rest, v);
+    }
+    u32be(&mut tkhd_rest, width << 16);
+    u32be(&mut tkhd_rest, height << 16);
+    let tkhd = boxed(b"tkhd", &fullbox_body(0, 7, &tkhd_rest));
+
+    let mut trak_body = Vec::new();
+    trak_body.extend_from_slice(&tkhd);
+    trak_body.extend_from_slice(&mdia);
+    let trak = boxed(b"trak", &trak_body);
+
+    let mut mvhd_rest = Vec::new();
+    u32be(&mut mvhd_rest, 0);
+    u32be(&mut mvhd_rest, 0);
+    u32be(&mut mvhd_rest, MOVIE_TIMESCALE);
+    u32be(&mut mvhd_rest, movie_duration);
+    u32be(&mut mvhd_rest, 0x0001_0000);
+    u16be(&mut mvhd_rest, 0x0100);
+    u16be(&mut mvhd_rest, 0);
+    for _ in 0..2 {
+        u32be(&mut mvhd_rest, 0);
+    }
+    for &v in &[0x0001_0000u32, 0, 0, 0, 0x0001_0000, 0, 0, 0, 0x4000_0000] {
+        u32be(&mut mvhd_rest, v);
+    }
+    for _ in 0..6 {
+        u32be(&mut mvhd_rest, 0);
+    }
+    u32be(&mut mvhd_rest, 2);
+    let mvhd = boxed(b"mvhd", &fullbox_body(0, 0, &mvhd_rest));
+
+    let mut moov_body = Vec::new();
+    moov_body.extend_from_slice(&mvhd);
+    moov_body.extend_from_slice(&trak);
+    boxed(b"moov", &moov_body)
+}
