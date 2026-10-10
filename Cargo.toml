@@ -14,3 +14,7 @@ path = "src/main.rs"
 
 [profile.release]
 opt-level = 3
+
+[dev-dependencies]
+# Independent WebP decoder, used only to verify the encoder's output in tests.
+image-webp = "0.2.4"

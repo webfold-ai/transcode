@@ -29,4 +29,5 @@ pub mod mp3_tables;
 pub mod opus;
 pub mod opus_tables;
 pub mod preview;
+pub mod webp;
 pub mod png;
