@@ -297,7 +297,9 @@ impl<'a> Reader<'a> {
         let vw = (v as u64) << (EC_WIN_SIZE - 16);
         let ret = (dif >= vw) as u32;
         dif -= ret as u64 * vw;
-        v += ret * (r - 2 * v);
+        // dav1d relies on 32-bit wrap-around here (`r - 2*v` is negative when v > r/2 and
+        // ret is 0 or 1); spell the wrap out so debug builds match release.
+        v = v.wrapping_add(ret.wrapping_mul(r.wrapping_sub(v.wrapping_mul(2))));
         self.norm(dif, v);
         ret == 0
     }
@@ -330,7 +332,9 @@ impl<'a> Reader<'a> {
         let vw = (v as u64) << (EC_WIN_SIZE - 16);
         let ret = (dif >= vw) as u32;
         dif -= ret as u64 * vw;
-        v += ret * (r - 2 * v);
+        // dav1d relies on 32-bit wrap-around here (`r - 2*v` is negative when v > r/2 and
+        // ret is 0 or 1); spell the wrap out so debug builds match release.
+        v = v.wrapping_add(ret.wrapping_mul(r.wrapping_sub(v.wrapping_mul(2))));
         self.norm(dif, v);
         (ret == 0) as u32
     }

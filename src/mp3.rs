@@ -338,7 +338,7 @@ pub fn reservoir_check(data: &[u8]) -> Result<String, String> {
 
 /// Read one Huffman codeword from `br` against (codes, lens), returning the
 /// entry index. Prefix-free, so accumulate bits until a (length, code) matches. -/
-pub fn read_huffman(br: &mut Br, codes: &[u32], lens: &[u8]) -> Option<usize> {
+fn read_huffman(br: &mut Br, codes: &[u32], lens: &[u8]) -> Option<usize> {
     if codes.is_empty() {
         return None;
     }
@@ -582,12 +582,12 @@ fn decode_is(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) -> [i
         let i2 = (g.region0_count as usize + g.region1_count as usize + 2).min(22);
         (sfb[i1].min(bvl), sfb[i2].min(bvl))
     };
-    let mut idx = 0usize;
+    let mut idx: usize;
     for (s, e, ts) in [(0usize, r1, g.table_select[0]), (r1, r2, g.table_select[1]), (r2, bvl, g.table_select[2])] {
         if s >= e { continue; }
         let (codes, lens, wrap) = crate::mp3_tables::table(ts as usize);
         let lin = crate::mp3_tables::LINBITS[ts as usize & 31];
-        if codes.is_empty() || wrap == 0 { idx = e; continue; }
+        if codes.is_empty() || wrap == 0 { continue; }
         idx = s;
         while idx < e {
             let hi = match read_huffman(br, codes, lens) { Some(v) => v as u32, None => return is };

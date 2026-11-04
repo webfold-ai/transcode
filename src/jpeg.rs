@@ -449,14 +449,6 @@ fn clamp_u8(v: f32) -> u8 {
 }
 
 #[inline]
-fn ycbcr_to_rgb(y: f32, cb: f32, cr: f32) -> (u8, u8, u8) {
-    let r = y + 1.402 * (cr - 128.0);
-    let g = y - 0.344136 * (cb - 128.0) - 0.714136 * (cr - 128.0);
-    let b = y + 1.772 * (cb - 128.0);
-    (clamp_u8(r), clamp_u8(g), clamp_u8(b))
-}
-
-#[inline]
 fn rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let y = 0.299 * r + 0.587 * g + 0.114 * b;
     let cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128.0;
@@ -1192,7 +1184,7 @@ mod writer_bench {
         let bytewise = || {
             let mut buf = Vec::new();
             let mut acc = 0u32; let mut nbits = 0u32;
-            let mut put = |buf: &mut Vec<u8>, acc: &mut u32, nbits: &mut u32, code: u32, len: u32| {
+            let put = |buf: &mut Vec<u8>, acc: &mut u32, nbits: &mut u32, code: u32, len: u32| {
                 *acc |= code << (32 - *nbits - len); *nbits += len;
                 while *nbits >= 8 { let b=(*acc>>24)as u8; buf.push(b); if b==0xFF{buf.push(0);} *acc<<=8; *nbits-=8; }
             };

@@ -13,6 +13,10 @@
 
 // ─── Ogg container ────────────────────────────────────────────────────────────
 
+// Opus decode -> PCM is partial (ROADMAP.md). The CELT synthesis helpers below are
+// scaffolding that is not wired up yet, so they are allowed to be unused for now.
+#![allow(dead_code)]
+
 /// One reassembled Opus packet (the bytes after Ogg framing).
 pub struct OggPacket {
     pub data: Vec<u8>,

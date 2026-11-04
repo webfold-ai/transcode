@@ -84,16 +84,16 @@ fn level_byte(tok: u32, is_hi: bool) -> u8 {
 /// Returns the token ∈ 3..=15. Symmetric (Enc emits hint's tokens, Dec decodes).
 fn code_hi_tok<C: Coder>(c: &mut C, br: &mut [u16], hint: u32) -> u32 {
     let h = hint.min(15);
-    let t1 = c.symbol(br, 4, (h - 3).min(3) as usize) as u32;
+    let t1 = c.symbol(br, 4, h.wrapping_sub(3).min(3) as usize) as u32;
     let mut tok = 3 + t1;
     if t1 == 3 {
-        let t2 = c.symbol(br, 4, (h - 6).min(3) as usize) as u32;
+        let t2 = c.symbol(br, 4, h.wrapping_sub(6).min(3) as usize) as u32;
         tok = 6 + t2;
         if t2 == 3 {
-            let t3 = c.symbol(br, 4, (h - 9).min(3) as usize) as u32;
+            let t3 = c.symbol(br, 4, h.wrapping_sub(9).min(3) as usize) as u32;
             tok = 9 + t3;
             if t3 == 3 {
-                let t4 = c.symbol(br, 4, (h - 12).min(3) as usize) as u32;
+                let t4 = c.symbol(br, 4, h.wrapping_sub(12).min(3) as usize) as u32;
                 tok = 12 + t4;
             }
         }

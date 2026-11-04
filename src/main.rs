@@ -14,16 +14,13 @@
 // applicative of proof/IIRFilterCollapse.lean) summed in i64.
 // ═══════════════════════════════════════════════════════════════════════════
 
+#![forbid(unsafe_code)]
+
 use std::f64::consts::PI;
 
-mod aac;
-mod aac_tables;
-mod codec;
-mod flac;
-mod mp3;
-mod mp3_tables;
-mod opus;
-mod opus_tables;
+// The codec modules come from the library crate (src/lib.rs). Declaring them here as
+// `mod aac;` etc. compiled a second copy into the binary, where most items looked unused.
+use transcode::{aac, codec, flac, mp3, opus};
 
 const FS: f64 = 2_147_483_648.0; // 2^31, canonical full scale
 
