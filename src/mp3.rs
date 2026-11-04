@@ -26,8 +26,12 @@ pub struct Mp3Info {
 }
 
 // Layer III bitrate tables (kbps), indexed by the 4-bit bitrate index.
-const BR_MPEG1: [u32; 16] = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
-const BR_MPEG2: [u32; 16] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+const BR_MPEG1: [u32; 16] = [
+    0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+];
+const BR_MPEG2: [u32; 16] = [
+    0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+];
 const SR_MPEG1: [u32; 3] = [44100, 48000, 32000];
 const SR_MPEG2: [u32; 3] = [22050, 24000, 16000];
 const SR_MPEG25: [u32; 3] = [11025, 12000, 8000];
@@ -107,7 +111,11 @@ pub fn parse(data: &[u8]) -> Result<Mp3Info, String> {
     let first = parse_header(data, p).ok_or("no MPEG Layer III frame found")?;
     let (version, layer) = {
         let h = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
-        let v = match (h >> 19) & 0b11 { 0b00 => Version::Mpeg25, 0b10 => Version::Mpeg2, _ => Version::Mpeg1 };
+        let v = match (h >> 19) & 0b11 {
+            0b00 => Version::Mpeg25,
+            0b10 => Version::Mpeg2,
+            _ => Version::Mpeg1,
+        };
         (v, 3u8)
     };
     let (samplerate, channels, br0) = (first.2, first.3, first.4);
@@ -141,7 +149,16 @@ pub fn parse(data: &[u8]) -> Result<Mp3Info, String> {
             }
         }
     }
-    Ok(Mp3Info { version, layer, samplerate, channels, frames, samples, bitrate_kbps_first: br0, vbr })
+    Ok(Mp3Info {
+        version,
+        layer,
+        samplerate,
+        channels,
+        frames,
+        samples,
+        bitrate_kbps_first: br0,
+        vbr,
+    })
 }
 
 // ─── step 1: side-info parsing + bit-reservoir accounting (MPEG-1) ────────────
@@ -158,7 +175,11 @@ impl<'a> Br<'a> {
         let mut v = 0u32;
         for _ in 0..n {
             let (byte, off) = (self.pos / 8, 7 - (self.pos % 8));
-            let bit = if byte < self.d.len() { (self.d[byte] >> off) & 1 } else { 0 };
+            let bit = if byte < self.d.len() {
+                (self.d[byte] >> off) & 1
+            } else {
+                0
+            };
             v = (v << 1) | bit as u32;
             self.pos += 1;
         }
@@ -186,7 +207,7 @@ pub struct Granule {
 
 pub struct SideInfo {
     pub main_data_begin: u32,
-    pub scfsi: Vec<u32>,             // [channel] 4-bit scale-factor selection info
+    pub scfsi: Vec<u32>, // [channel] 4-bit scale-factor selection info
     pub granules: Vec<Vec<Granule>>, // [granule][channel]
 }
 
@@ -216,7 +237,11 @@ pub fn parse_side_info(b: &[u8], nch: usize) -> SideInfo {
                     g.subblock_gain[i] = r.bits(3);
                 }
                 // region counts implied for short blocks
-                g.region0_count = if g.block_type == 2 && !g.mixed_block { 8 } else { 7 };
+                g.region0_count = if g.block_type == 2 && !g.mixed_block {
+                    8
+                } else {
+                    7
+                };
                 g.region1_count = 36;
             } else {
                 for i in 0..3 {
@@ -230,7 +255,11 @@ pub fn parse_side_info(b: &[u8], nch: usize) -> SideInfo {
             g.count1table_select = r.bits(1) == 1;
         }
     }
-    SideInfo { main_data_begin, scfsi, granules }
+    SideInfo {
+        main_data_begin,
+        scfsi,
+        granules,
+    }
 }
 
 /// Walk all frames, parse each side-info block, and report aggregate stats +
@@ -318,8 +347,15 @@ pub fn reservoir_check(data: &[u8]) -> Result<String, String> {
         if md_start < md_end {
             reservoir.extend_from_slice(&data[md_start..md_end]);
         }
-        let total_bits: u64 = si.granules.iter().flatten().map(|g| g.part2_3_length as u64).sum();
-        if frame_main_start >= 0 && (frame_main_start as u64) * 8 + total_bits > (reservoir.len() as u64) * 8 {
+        let total_bits: u64 = si
+            .granules
+            .iter()
+            .flatten()
+            .map(|g| g.part2_3_length as u64)
+            .sum();
+        if frame_main_start >= 0
+            && (frame_main_start as u64) * 8 + total_bits > (reservoir.len() as u64) * 8
+        {
             overflow += 1;
         }
         frames += 1;
@@ -394,16 +430,34 @@ pub fn huffman_selftest() -> i32 {
         let (c, l) = crate::mp3_tables::quad_table(q);
         check(c, l);
     }
-    println!("huffman round-trip: {} entries, {} failures [{}]", total, fails, if fails == 0 { "ok" } else { "FAIL" });
-    if fails == 0 { 0 } else { 1 }
+    println!(
+        "huffman round-trip: {} entries, {} failures [{}]",
+        total,
+        fails,
+        if fails == 0 { "ok" } else { "FAIL" }
+    );
+    if fails == 0 {
+        0
+    } else {
+        1
+    }
 }
 
 // ─── step 3b: scalefactor bit accounting + spectral (part3) decode ────────────
 
 // Long-block scalefactor-band boundaries (sample indices), MPEG-1, per samplerate.
-const SFB_44100: [usize; 23] = [0,4,8,12,16,20,24,30,36,44,52,62,74,90,110,134,162,196,238,288,342,418,576];
-const SFB_48000: [usize; 23] = [0,4,8,12,16,20,24,30,36,42,50,60,72,88,106,128,156,190,230,276,330,384,576];
-const SFB_32000: [usize; 23] = [0,4,8,12,16,20,24,30,36,44,54,66,82,102,126,156,194,240,296,364,448,550,576];
+const SFB_44100: [usize; 23] = [
+    0, 4, 8, 12, 16, 20, 24, 30, 36, 44, 52, 62, 74, 90, 110, 134, 162, 196, 238, 288, 342, 418,
+    576,
+];
+const SFB_48000: [usize; 23] = [
+    0, 4, 8, 12, 16, 20, 24, 30, 36, 42, 50, 60, 72, 88, 106, 128, 156, 190, 230, 276, 330, 384,
+    576,
+];
+const SFB_32000: [usize; 23] = [
+    0, 4, 8, 12, 16, 20, 24, 30, 36, 44, 54, 66, 82, 102, 126, 156, 194, 240, 296, 364, 448, 550,
+    576,
+];
 
 fn sfb_long(samplerate: u32) -> &'static [usize; 23] {
     match samplerate {
@@ -415,23 +469,50 @@ fn sfb_long(samplerate: u32) -> &'static [usize; 23] {
 
 // scalefac_compress → (slen1, slen2)
 const SLEN: [(u32, u32); 16] = [
-    (0,0),(0,1),(0,2),(0,3),(3,0),(1,1),(1,2),(1,3),(2,1),(2,2),(2,3),(3,1),(3,2),(3,3),(4,2),(4,3),
+    (0, 0),
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (3, 0),
+    (1, 1),
+    (1, 2),
+    (1, 3),
+    (2, 1),
+    (2, 2),
+    (2, 3),
+    (3, 1),
+    (3, 2),
+    (3, 3),
+    (4, 2),
+    (4, 3),
 ];
 
 /// Exact number of part2 (scalefactor) bits for a granule. -/
 fn part2_bits(g: &Granule, gr: usize, scfsi: u32) -> u32 {
     let (s1, s2) = SLEN[g.scalefac_compress as usize & 15];
     if g.block_type == 2 {
-        if g.mixed_block { 17 * s1 + 18 * s2 } else { 18 * s1 + 18 * s2 }
+        if g.mixed_block {
+            17 * s1 + 18 * s2
+        } else {
+            18 * s1 + 18 * s2
+        }
     } else if gr == 0 {
         11 * s1 + 10 * s2
     } else {
         // scfsi groups (gr1): bit3=sfb0-5, bit2=sfb6-10, bit1=sfb11-15, bit0=sfb16-20
         let mut b = 0;
-        if scfsi & 0b1000 == 0 { b += 6 * s1; }
-        if scfsi & 0b0100 == 0 { b += 5 * s1; }
-        if scfsi & 0b0010 == 0 { b += 5 * s2; }
-        if scfsi & 0b0001 == 0 { b += 5 * s2; }
+        if scfsi & 0b1000 == 0 {
+            b += 6 * s1;
+        }
+        if scfsi & 0b0100 == 0 {
+            b += 5 * s1;
+        }
+        if scfsi & 0b0010 == 0 {
+            b += 5 * s2;
+        }
+        if scfsi & 0b0001 == 0 {
+            b += 5 * s2;
+        }
         b
     }
 }
@@ -448,7 +529,11 @@ fn decode_part3(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) ->
         let i2 = (g.region0_count as usize + g.region1_count as usize + 2).min(22);
         (sfb[i1].min(bvl), sfb[i2].min(bvl))
     };
-    for (s, e, ts) in [(0usize, r1, g.table_select[0]), (r1, r2, g.table_select[1]), (r2, bvl, g.table_select[2])] {
+    for (s, e, ts) in [
+        (0usize, r1, g.table_select[0]),
+        (r1, r2, g.table_select[1]),
+        (r2, bvl, g.table_select[2]),
+    ] {
         if s >= e {
             continue;
         }
@@ -459,13 +544,24 @@ fn decode_part3(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) ->
         }
         let mut i = s;
         while i < e {
-            let idx = match read_huffman(br, codes, lens) { Some(v) => v as u32, None => return false };
+            let idx = match read_huffman(br, codes, lens) {
+                Some(v) => v as u32,
+                None => return false,
+            };
             let mut x = idx / wrap as u32;
             let mut y = idx % wrap as u32;
-            if x == 15 && lin > 0 { x += br.bits(lin); }
-            if x > 0 { br.bits(1); }
-            if y == 15 && lin > 0 { y += br.bits(lin); }
-            if y > 0 { br.bits(1); }
+            if x == 15 && lin > 0 {
+                x += br.bits(lin);
+            }
+            if x > 0 {
+                br.bits(1);
+            }
+            if y == 15 && lin > 0 {
+                y += br.bits(lin);
+            }
+            if y > 0 {
+                br.bits(1);
+            }
             i += 2;
         }
     }
@@ -473,9 +569,14 @@ fn decode_part3(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) ->
     let (qc, ql) = crate::mp3_tables::quad_table(g.count1table_select as u8);
     let mut idx = bvl;
     while br.pos < boundary && idx < 576 {
-        let qi = match read_huffman(br, qc, ql) { Some(v) => v as u32, None => return false };
+        let qi = match read_huffman(br, qc, ql) {
+            Some(v) => v as u32,
+            None => return false,
+        };
         for b in 0..4 {
-            if (qi >> (3 - b)) & 1 == 1 { br.bits(1); }
+            if (qi >> (3 - b)) & 1 == 1 {
+                br.bits(1);
+            }
         }
         idx += 4;
     }
@@ -492,23 +593,34 @@ pub fn spectral_check(data: &[u8]) -> Result<String, String> {
     let sfb = sfb_long(info.samplerate);
     // pass 1: build reservoir + record per-frame (main_start, side_info)
     let mut p = 0usize;
-    if data.len() > 10 && &data[0..3] == b"ID3" { p = 10 + syncsafe(&data[6..10]); }
+    if data.len() > 10 && &data[0..3] == b"ID3" {
+        p = 10 + syncsafe(&data[6..10]);
+    }
     let mut reservoir: Vec<u8> = Vec::new();
     let mut frames: Vec<(usize, SideInfo)> = Vec::new();
     while let Some((len, _, sr, ch, _)) = parse_header(data, p) {
-        if sr != info.samplerate || ch != info.channels { p += 1; continue; }
+        if sr != info.samplerate || ch != info.channels {
+            p += 1;
+            continue;
+        }
         let h = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
         let crc = if (h >> 16) & 1 == 0 { 2 } else { 0 };
         let si_start = p + 4 + crc;
-        if si_start + si_bytes > data.len() { break; }
+        if si_start + si_bytes > data.len() {
+            break;
+        }
         let si = parse_side_info(&data[si_start..si_start + si_bytes], nch);
         let start = reservoir.len() as isize - si.main_data_begin as isize;
         let md_end = (p + len).min(data.len());
         if si_start + si_bytes < md_end {
             reservoir.extend_from_slice(&data[si_start + si_bytes..md_end]);
         }
-        if start >= 0 { frames.push((start as usize, si)); }
-        if p + len + 4 > data.len() { break; }
+        if start >= 0 {
+            frames.push((start as usize, si));
+        }
+        if p + len + 4 > data.len() {
+            break;
+        }
         p += len;
     }
     // pass 2: decode each granule's part3, check bit landing
@@ -520,10 +632,15 @@ pub fn spectral_check(data: &[u8]) -> Result<String, String> {
         for gr in 0..2 {
             for ch in 0..nch {
                 let g = &si.granules[gr][ch];
-                if g.part2_3_length == 0 { gpos += 0; continue; }
+                if g.part2_3_length == 0 {
+                    gpos += 0;
+                    continue;
+                }
                 let start = gpos;
                 let boundary = start + g.part2_3_length as usize;
-                if boundary > reservoir.len() * 8 { continue; }
+                if boundary > reservoir.len() * 8 {
+                    continue;
+                }
                 let p2 = part2_bits(g, gr, si.scfsi[ch]) as usize;
                 let mut br = Br::new(&reservoir);
                 br.pos = start + p2;
@@ -542,7 +659,9 @@ pub fn spectral_check(data: &[u8]) -> Result<String, String> {
                         );
                     }
                 }
-                if dev.abs() > maxdev.abs() { maxdev = dev; }
+                if dev.abs() > maxdev.abs() {
+                    maxdev = dev;
+                }
                 gpos = boundary;
             }
         }
@@ -583,22 +702,43 @@ fn decode_is(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) -> [i
         (sfb[i1].min(bvl), sfb[i2].min(bvl))
     };
     let mut idx: usize;
-    for (s, e, ts) in [(0usize, r1, g.table_select[0]), (r1, r2, g.table_select[1]), (r2, bvl, g.table_select[2])] {
-        if s >= e { continue; }
+    for (s, e, ts) in [
+        (0usize, r1, g.table_select[0]),
+        (r1, r2, g.table_select[1]),
+        (r2, bvl, g.table_select[2]),
+    ] {
+        if s >= e {
+            continue;
+        }
         let (codes, lens, wrap) = crate::mp3_tables::table(ts as usize);
         let lin = crate::mp3_tables::LINBITS[ts as usize & 31];
-        if codes.is_empty() || wrap == 0 { continue; }
+        if codes.is_empty() || wrap == 0 {
+            continue;
+        }
         idx = s;
         while idx < e {
-            let hi = match read_huffman(br, codes, lens) { Some(v) => v as u32, None => return is };
+            let hi = match read_huffman(br, codes, lens) {
+                Some(v) => v as u32,
+                None => return is,
+            };
             let mut x = (hi / wrap as u32) as i32;
             let mut y = (hi % wrap as u32) as i32;
-            if x == 15 && lin > 0 { x += br.bits(lin) as i32; }
-            if x != 0 && br.bits(1) == 1 { x = -x; }
-            if y == 15 && lin > 0 { y += br.bits(lin) as i32; }
-            if y != 0 && br.bits(1) == 1 { y = -y; }
+            if x == 15 && lin > 0 {
+                x += br.bits(lin) as i32;
+            }
+            if x != 0 && br.bits(1) == 1 {
+                x = -x;
+            }
+            if y == 15 && lin > 0 {
+                y += br.bits(lin) as i32;
+            }
+            if y != 0 && br.bits(1) == 1 {
+                y = -y;
+            }
             is[idx] = x;
-            if idx + 1 < 576 { is[idx + 1] = y; }
+            if idx + 1 < 576 {
+                is[idx + 1] = y;
+            }
             idx += 2;
         }
     }
@@ -606,7 +746,10 @@ fn decode_is(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) -> [i
     let (qc, ql) = crate::mp3_tables::quad_table(g.count1table_select as u8);
     idx = bvl;
     while br.pos < boundary && idx + 4 <= 576 {
-        let qi = match read_huffman(br, qc, ql) { Some(v) => v as u32, None => return is };
+        let qi = match read_huffman(br, qc, ql) {
+            Some(v) => v as u32,
+            None => return is,
+        };
         for b in 0..4 {
             if (qi >> (3 - b)) & 1 == 1 {
                 let v = if br.bits(1) == 1 { -1 } else { 1 };
@@ -622,7 +765,9 @@ fn decode_is(br: &mut Br, g: &Granule, sfb: &[usize; 23], boundary: usize) -> [i
 ///   xr = sign(is)·|is|^(4/3) · 2^(0.25·(global_gain−210)) · 2^(−mult·scalefac[sfb])
 /// with mult = scalefac_scale ? 1 : 0.5, plus the preflag pretab. -/
 fn requantize_long(is: &[i32; 576], sf: &[u32; 21], g: &Granule, sfb: &[usize; 23]) -> [f64; 576] {
-    const PRETAB: [u32; 22] = [0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,3,2,0];
+    const PRETAB: [u32; 22] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0,
+    ];
     let mult = if g.scalefac_scale { 1.0 } else { 0.5 };
     let gain = 0.25 * (g.global_gain as f64 - 210.0);
     let mut xr = [0.0f64; 576];
@@ -648,25 +793,42 @@ pub fn requant_check(data: &[u8]) -> Result<String, String> {
     let si_bytes = if nch == 1 { 17 } else { 32 };
     let sfb = sfb_long(info.samplerate);
     let mut p = 0usize;
-    if data.len() > 10 && &data[0..3] == b"ID3" { p = 10 + syncsafe(&data[6..10]); }
+    if data.len() > 10 && &data[0..3] == b"ID3" {
+        p = 10 + syncsafe(&data[6..10]);
+    }
     let mut reservoir: Vec<u8> = Vec::new();
     let mut first: Option<(usize, SideInfo)> = None;
     let mut nlong = 0u64;
     while let Some((len, _, sr, ch, _)) = parse_header(data, p) {
-        if sr != info.samplerate || ch != info.channels { p += 1; continue; }
-        let h = u32::from_be_bytes([data[p], data[p+1], data[p+2], data[p+3]]);
+        if sr != info.samplerate || ch != info.channels {
+            p += 1;
+            continue;
+        }
+        let h = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
         let crc = if (h >> 16) & 1 == 0 { 2 } else { 0 };
         let si_start = p + 4 + crc;
-        if si_start + si_bytes > data.len() { break; }
+        if si_start + si_bytes > data.len() {
+            break;
+        }
         let si = parse_side_info(&data[si_start..si_start + si_bytes], nch);
         let start = reservoir.len() as isize - si.main_data_begin as isize;
         let md_end = (p + len).min(data.len());
-        if si_start + si_bytes < md_end { reservoir.extend_from_slice(&data[si_start + si_bytes..md_end]); }
-        if first.is_none() && start >= 0 && si.granules[0][0].block_type != 2 && si.granules[0][0].big_values > 30 {
+        if si_start + si_bytes < md_end {
+            reservoir.extend_from_slice(&data[si_start + si_bytes..md_end]);
+        }
+        if first.is_none()
+            && start >= 0
+            && si.granules[0][0].block_type != 2
+            && si.granules[0][0].big_values > 30
+        {
             first = Some((start as usize, si.clone_min()));
         }
-        if si.granules[0][0].block_type != 2 { nlong += 1; }
-        if p + len + 4 > data.len() { break; }
+        if si.granules[0][0].block_type != 2 {
+            nlong += 1;
+        }
+        if p + len + 4 > data.len() {
+            break;
+        }
         p += len;
     }
     let (mstart, si) = first.ok_or("no long-block granule found")?;
@@ -689,7 +851,11 @@ pub fn requant_check(data: &[u8]) -> Result<String, String> {
 
 impl SideInfo {
     fn clone_min(&self) -> SideInfo {
-        SideInfo { main_data_begin: self.main_data_begin, scfsi: self.scfsi.clone(), granules: self.granules.clone() }
+        SideInfo {
+            main_data_begin: self.main_data_begin,
+            scfsi: self.scfsi.clone(),
+            granules: self.granules.clone(),
+        }
     }
 }
 
@@ -705,30 +871,36 @@ struct ChanState {
 }
 impl ChanState {
     fn new() -> Self {
-        ChanState { overlap: [[0.0; 18]; 32], v: [0.0; 1024], prev_sf: [0; 21] }
+        ChanState {
+            overlap: [[0.0; 18]; 32],
+            v: [0.0; 1024],
+            prev_sf: [0; 21],
+        }
     }
 }
 
 /// Precomputed cosine matrices (computed once, not tabled).
 struct Dsp {
-    imdct: [[f32; 18]; 36],  // imdct[i][k] = cos(PI/72 * (2i+1+18)(2k+1))
-    imdct6: [[f32; 6]; 12],  // 6-point IMDCT for short blocks
-    win_long: [f32; 36],     // sin window (block_type 0)
-    win_short: [f32; 12],    // sin window for short blocks
-    nmat: Vec<f32>,          // 64x32 synthesis matrixing cos
+    imdct: [[f32; 18]; 36], // imdct[i][k] = cos(PI/72 * (2i+1+18)(2k+1))
+    imdct6: [[f32; 6]; 12], // 6-point IMDCT for short blocks
+    win_long: [f32; 36],    // sin window (block_type 0)
+    win_short: [f32; 12],   // sin window for short blocks
+    nmat: Vec<f32>,         // 64x32 synthesis matrixing cos
 }
 impl Dsp {
     fn new() -> Self {
         let mut imdct = [[0.0f32; 18]; 36];
         for i in 0..36 {
             for k in 0..18 {
-                imdct[i][k] = ((PI / 72.0) * ((2 * i + 1 + 18) as f64) * ((2 * k + 1) as f64)).cos() as f32;
+                imdct[i][k] =
+                    ((PI / 72.0) * ((2 * i + 1 + 18) as f64) * ((2 * k + 1) as f64)).cos() as f32;
             }
         }
         let mut imdct6 = [[0.0f32; 6]; 12];
         for i in 0..12 {
             for k in 0..6 {
-                imdct6[i][k] = ((PI / 24.0) * ((2 * i + 1 + 6) as f64) * ((2 * k + 1) as f64)).cos() as f32;
+                imdct6[i][k] =
+                    ((PI / 24.0) * ((2 * i + 1 + 6) as f64) * ((2 * k + 1) as f64)).cos() as f32;
             }
         }
         let mut win_long = [0.0f32; 36];
@@ -742,16 +914,27 @@ impl Dsp {
         let mut nmat = vec![0.0f32; 64 * 32];
         for i in 0..64 {
             for k in 0..32 {
-                nmat[i * 32 + k] = ((PI / 64.0) * ((2 * k + 1) as f64) * ((i + 16) as f64)).cos() as f32;
+                nmat[i * 32 + k] =
+                    ((PI / 64.0) * ((2 * k + 1) as f64) * ((i + 16) as f64)).cos() as f32;
             }
         }
-        Dsp { imdct, imdct6, win_long, win_short, nmat }
+        Dsp {
+            imdct,
+            imdct6,
+            win_long,
+            win_short,
+            nmat,
+        }
     }
 }
 
 fn alias_reduce(xr: &mut [f32; 576]) {
-    const CS: [f32; 8] = [0.857493, 0.881742, 0.949629, 0.983315, 0.995518, 0.999161, 0.999899, 0.999993];
-    const CA: [f32; 8] = [-0.514496, -0.471732, -0.313377, -0.181913, -0.094574, -0.040966, -0.014199, -0.003700];
+    const CS: [f32; 8] = [
+        0.857493, 0.881742, 0.949629, 0.983315, 0.995518, 0.999161, 0.999899, 0.999993,
+    ];
+    const CA: [f32; 8] = [
+        -0.514496, -0.471732, -0.313377, -0.181913, -0.094574, -0.040966, -0.014199, -0.003700,
+    ];
     for sb in 1..32 {
         let base = sb * 18;
         for i in 0..8 {
@@ -829,7 +1012,10 @@ fn synth_granule(st: &mut ChanState, dsp: &Dsp, mut xr: [f32; 576], short: bool)
         }
         if sb & 1 == 1 {
             let mut i = 1;
-            while i < 18 { o[i] = -o[i]; i += 2; }
+            while i < 18 {
+                o[i] = -o[i];
+                i += 2;
+            }
         }
         sub[sb] = o;
     }
@@ -837,22 +1023,41 @@ fn synth_granule(st: &mut ChanState, dsp: &Dsp, mut xr: [f32; 576], short: bool)
     let mut tmp = [0.0f32; 32];
     for ts in 0..18 {
         let mut s = [0.0f32; 32];
-        for sb in 0..32 { s[sb] = sub[sb][ts]; }
+        for sb in 0..32 {
+            s[sb] = sub[sb][ts];
+        }
         synth_step(st, dsp, &s, &mut tmp);
-        for j in 0..32 { pcm[ts * 32 + j] = tmp[j]; }
+        for j in 0..32 {
+            pcm[ts * 32 + j] = tmp[j];
+        }
     }
     pcm
 }
 
-fn read_scalefac(br: &mut Br, g: &Granule, gr: usize, scfsi: u32, prev: &mut [u32; 21]) -> [u32; 21] {
+fn read_scalefac(
+    br: &mut Br,
+    g: &Granule,
+    gr: usize,
+    scfsi: u32,
+    prev: &mut [u32; 21],
+) -> [u32; 21] {
     let (s1, s2) = SLEN[g.scalefac_compress as usize & 15];
     let mut sf = [0u32; 21];
-    let groups = [(0usize, 6, s1, 0b1000u32), (6, 11, s1, 0b0100), (11, 16, s2, 0b0010), (16, 21, s2, 0b0001)];
+    let groups = [
+        (0usize, 6, s1, 0b1000u32),
+        (6, 11, s1, 0b0100),
+        (11, 16, s2, 0b0010),
+        (16, 21, s2, 0b0001),
+    ];
     for (lo, hi, slen, bit) in groups {
         if gr == 1 && scfsi & bit != 0 {
-            for i in lo..hi { sf[i] = prev[i]; }
+            for i in lo..hi {
+                sf[i] = prev[i];
+            }
         } else {
-            for i in lo..hi { sf[i] = if slen > 0 { br.bits(slen) } else { 0 }; }
+            for i in lo..hi {
+                sf[i] = if slen > 0 { br.bits(slen) } else { 0 };
+            }
         }
     }
     *prev = sf;
@@ -863,28 +1068,43 @@ fn read_scalefac(br: &mut Br, g: &Granule, gr: usize, scfsi: u32, prev: &mut [u3
 /// now). Returns (samples i16, samplerate). First-cut, validated by SNR. -/
 pub fn decode_pcm_mono(data: &[u8]) -> Result<(Vec<i16>, u32), String> {
     let info = parse(data)?;
-    if info.channels != 1 { return Err("mono-only decode (first cut)".into()); }
+    if info.channels != 1 {
+        return Err("mono-only decode (first cut)".into());
+    }
     let si_bytes = 17;
     let sfb = sfb_long(info.samplerate);
     let sfb_s = sfb_short(info.samplerate);
     let dsp = Dsp::new();
     // build reservoir + per-frame side info
     let mut p = 0usize;
-    if data.len() > 10 && &data[0..3] == b"ID3" { p = 10 + syncsafe(&data[6..10]); }
+    if data.len() > 10 && &data[0..3] == b"ID3" {
+        p = 10 + syncsafe(&data[6..10]);
+    }
     let mut res: Vec<u8> = Vec::new();
     let mut frames: Vec<(usize, SideInfo)> = Vec::new();
     while let Some((len, _, sr, ch, _)) = parse_header(data, p) {
-        if sr != info.samplerate || ch != 1 { p += 1; continue; }
-        let h = u32::from_be_bytes([data[p], data[p+1], data[p+2], data[p+3]]);
+        if sr != info.samplerate || ch != 1 {
+            p += 1;
+            continue;
+        }
+        let h = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
         let crc = if (h >> 16) & 1 == 0 { 2 } else { 0 };
         let si_start = p + 4 + crc;
-        if si_start + si_bytes > data.len() { break; }
+        if si_start + si_bytes > data.len() {
+            break;
+        }
         let si = parse_side_info(&data[si_start..si_start + si_bytes], 1);
         let start = res.len() as isize - si.main_data_begin as isize;
         let md_end = (p + len).min(data.len());
-        if si_start + si_bytes < md_end { res.extend_from_slice(&data[si_start + si_bytes..md_end]); }
-        if start >= 0 { frames.push((start as usize, si)); }
-        if p + len + 4 > data.len() { break; }
+        if si_start + si_bytes < md_end {
+            res.extend_from_slice(&data[si_start + si_bytes..md_end]);
+        }
+        if start >= 0 {
+            frames.push((start as usize, si));
+        }
+        if p + len + 4 > data.len() {
+            break;
+        }
         p += len;
     }
     let mut st = ChanState::new();
@@ -896,7 +1116,9 @@ pub fn decode_pcm_mono(data: &[u8]) -> Result<(Vec<i16>, u32), String> {
             let g = &si.granules[gr][0];
             let start = br.pos;
             let boundary = start + g.part2_3_length as usize;
-            if boundary > res.len() * 8 { return Err("reservoir underrun".into()); }
+            if boundary > res.len() * 8 {
+                return Err("reservoir underrun".into());
+            }
             let short = g.block_type == 2;
             let xr = if short {
                 let sf = read_scalefac_short(&mut br, g);
@@ -910,7 +1132,9 @@ pub fn decode_pcm_mono(data: &[u8]) -> Result<(Vec<i16>, u32), String> {
                 br.pos = boundary;
                 let xr64 = requantize_long(&is, &sf, g, sfb);
                 let mut xr = [0.0f32; 576];
-                for i in 0..576 { xr[i] = xr64[i] as f32; }
+                for i in 0..576 {
+                    xr[i] = xr64[i] as f32;
+                }
                 xr
             };
             let gp = synth_granule(&mut st, &dsp, xr, short);
@@ -929,7 +1153,9 @@ pub fn decode_pcm_mono(data: &[u8]) -> Result<(Vec<i16>, u32), String> {
 pub fn imdct_tdac_test() -> i32 {
     let dsp = Dsp::new();
     let n = 18 * 12;
-    let x: Vec<f32> = (0..n).map(|i| ((i as f64 * 0.31).sin() + 0.5 * (i as f64 * 0.07).cos()) as f32).collect();
+    let x: Vec<f32> = (0..n)
+        .map(|i| ((i as f64 * 0.31).sin() + 0.5 * (i as f64 * 0.07).cos()) as f32)
+        .collect();
     for &scale in &[1.0f64, 2.0 / 18.0, 1.0 / 9.0, 1.0 / 18.0, 2.0 / 36.0] {
         let mut recon = vec![0f32; n];
         let mut overlap = [0f32; 18];
@@ -942,13 +1168,17 @@ pub fn imdct_tdac_test() -> i32 {
             let mut coef = [0f32; 18];
             for k in 0..18 {
                 let mut a = 0.0f32;
-                for nn in 0..36 { a += z[nn] * dsp.imdct[nn][k]; }
+                for nn in 0..36 {
+                    a += z[nn] * dsp.imdct[nn][k];
+                }
                 coef[k] = a;
             }
             let mut y = [0f32; 36];
             for nn in 0..36 {
                 let mut a = 0.0f32;
-                for k in 0..18 { a += coef[k] * dsp.imdct[nn][k]; }
+                for k in 0..18 {
+                    a += coef[k] * dsp.imdct[nn][k];
+                }
                 y[nn] = a * scale as f32 * dsp.win_long[nn];
             }
             for i in 0..18 {
@@ -961,7 +1191,11 @@ pub fn imdct_tdac_test() -> i32 {
             num += (x[i] as f64).powi(2);
             err += ((x[i] - recon[i]) as f64).powi(2);
         }
-        let snr = if err > 0.0 { 10.0 * (num / err).log10() } else { 999.0 };
+        let snr = if err > 0.0 {
+            10.0 * (num / err).log10()
+        } else {
+            999.0
+        };
         println!("  18-pt scale={scale:.5}  reconstruction SNR = {snr:.1} dB");
     }
     // 6-point IMDCT (short blocks): 12-sample frames, hop 6, scale 2/6
@@ -974,16 +1208,40 @@ pub fn imdct_tdac_test() -> i32 {
         for f in 0..(m / 6 - 1) {
             let s = f * 6;
             let mut z = [0f32; 12];
-            for i in 0..12 { z[i] = if s + i < m { xs[s + i] } else { 0.0 } * dsp.win_short[i]; }
+            for i in 0..12 {
+                z[i] = if s + i < m { xs[s + i] } else { 0.0 } * dsp.win_short[i];
+            }
             let mut coef = [0f32; 6];
-            for k in 0..6 { let mut a = 0.0f32; for nn in 0..12 { a += z[nn] * dsp.imdct6[nn][k]; } coef[k] = a; }
+            for k in 0..6 {
+                let mut a = 0.0f32;
+                for nn in 0..12 {
+                    a += z[nn] * dsp.imdct6[nn][k];
+                }
+                coef[k] = a;
+            }
             let mut y = [0f32; 12];
-            for nn in 0..12 { let mut a = 0.0f32; for k in 0..6 { a += coef[k] * dsp.imdct6[nn][k]; } y[nn] = a * scale * dsp.win_short[nn]; }
-            for i in 0..6 { recon[s + i] = y[i] + ov[i]; ov[i] = y[6 + i]; }
+            for nn in 0..12 {
+                let mut a = 0.0f32;
+                for k in 0..6 {
+                    a += coef[k] * dsp.imdct6[nn][k];
+                }
+                y[nn] = a * scale * dsp.win_short[nn];
+            }
+            for i in 0..6 {
+                recon[s + i] = y[i] + ov[i];
+                ov[i] = y[6 + i];
+            }
         }
         let (mut num, mut err) = (0f64, 0f64);
-        for i in 18..(m - 18) { num += (xs[i] as f64).powi(2); err += ((xs[i] - recon[i]) as f64).powi(2); }
-        let snr = if err > 0.0 { 10.0 * (num / err).log10() } else { 999.0 };
+        for i in 18..(m - 18) {
+            num += (xs[i] as f64).powi(2);
+            err += ((xs[i] - recon[i]) as f64).powi(2);
+        }
+        let snr = if err > 0.0 {
+            10.0 * (num / err).log10()
+        } else {
+            999.0
+        };
         println!("  6-pt  scale={scale:.5}  reconstruction SNR = {snr:.1} dB");
     }
     0
@@ -1000,7 +1258,8 @@ pub fn filterbank_test() -> i32 {
         let (mut s1, mut s2) = (0.0f64, 0.0f64);
         for &v in x {
             let s0 = v as f64 + c * s1 - s2;
-            s2 = s1; s1 = s0;
+            s2 = s1;
+            s1 = s0;
         }
         ((s1 * s1 + s2 * s2 - c * s1 * s2).sqrt()) / x.len() as f64
     };
@@ -1010,7 +1269,9 @@ pub fn filterbank_test() -> i32 {
         let mut tmp = [0.0f32; 32];
         for step in 0..20 {
             let mut s = [0.0f32; 32];
-            if step == 0 { s[sb] = 1.0; } // impulse in this subband
+            if step == 0 {
+                s[sb] = 1.0;
+            } // impulse in this subband
             synth_step(&mut st, &dsp, &s, &mut tmp);
             out.extend_from_slice(&tmp);
         }
@@ -1058,7 +1319,12 @@ fn read_scalefac_short(br: &mut Br, g: &Granule) -> [[u32; 13]; 3] {
 }
 
 /// Requantize short-block spectral values (stored sfb-window order). -/
-fn requantize_short(is: &[i32; 576], sf: &[[u32; 13]; 3], g: &Granule, sfb_s: &[usize; 14]) -> [f64; 576] {
+fn requantize_short(
+    is: &[i32; 576],
+    sf: &[[u32; 13]; 3],
+    g: &Granule,
+    sfb_s: &[usize; 14],
+) -> [f64; 576] {
     let mult = if g.scalefac_scale { 1.0 } else { 0.5 };
     let gain = 0.25 * (g.global_gain as f64 - 210.0);
     let mut xr = [0.0f64; 576];
@@ -1069,7 +1335,9 @@ fn requantize_short(is: &[i32; 576], sf: &[[u32; 13]; 3], g: &Granule, sfb_s: &[
             let exp = gain - 2.0 * g.subblock_gain[win] as f64 - mult * sf[win][sfb.min(11)] as f64;
             let scale = exp.exp2();
             for _ in 0..width {
-                if idx >= 576 { break; }
+                if idx >= 576 {
+                    break;
+                }
                 let v = is[idx];
                 if v != 0 {
                     xr[idx] = v.signum() as f64 * (v.unsigned_abs() as f64).powf(4.0 / 3.0) * scale;
@@ -1112,24 +1380,37 @@ pub fn decode_pcm(data: &[u8]) -> Result<(Vec<i16>, u32, u16), String> {
     let sfb_s = sfb_short(info.samplerate);
     let dsp = Dsp::new();
     let mut p = 0usize;
-    if data.len() > 10 && &data[0..3] == b"ID3" { p = 10 + syncsafe(&data[6..10]); }
+    if data.len() > 10 && &data[0..3] == b"ID3" {
+        p = 10 + syncsafe(&data[6..10]);
+    }
     let mut res: Vec<u8> = Vec::new();
     let mut frames: Vec<(usize, SideInfo, bool)> = Vec::new(); // (main_start, side_info, ms_on)
     while let Some((len, _, sr, ch, _)) = parse_header(data, p) {
-        if sr != info.samplerate || ch != info.channels { p += 1; continue; }
+        if sr != info.samplerate || ch != info.channels {
+            p += 1;
+            continue;
+        }
         let h = u32::from_be_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]);
         let mode = (h >> 6) & 0b11;
         let mode_ext = (h >> 4) & 0b11;
         let ms_on = mode == 0b01 && (mode_ext & 0b10) != 0;
         let crc = if (h >> 16) & 1 == 0 { 2 } else { 0 };
         let si_start = p + 4 + crc;
-        if si_start + si_bytes > data.len() { break; }
+        if si_start + si_bytes > data.len() {
+            break;
+        }
         let si = parse_side_info(&data[si_start..si_start + si_bytes], nch);
         let start = res.len() as isize - si.main_data_begin as isize;
         let md_end = (p + len).min(data.len());
-        if si_start + si_bytes < md_end { res.extend_from_slice(&data[si_start + si_bytes..md_end]); }
-        if start >= 0 { frames.push((start as usize, si, ms_on)); }
-        if p + len + 4 > data.len() { break; }
+        if si_start + si_bytes < md_end {
+            res.extend_from_slice(&data[si_start + si_bytes..md_end]);
+        }
+        if start >= 0 {
+            frames.push((start as usize, si, ms_on));
+        }
+        if p + len + 4 > data.len() {
+            break;
+        }
         p += len;
     }
     let mut states: Vec<ChanState> = (0..nch).map(|_| ChanState::new()).collect();
@@ -1144,7 +1425,9 @@ pub fn decode_pcm(data: &[u8]) -> Result<(Vec<i16>, u32, u16), String> {
             for ch in 0..nch {
                 let g = &si.granules[gr][ch];
                 let boundary = br.pos + g.part2_3_length as usize;
-                if boundary > res.len() * 8 { return Err("reservoir underrun".into()); }
+                if boundary > res.len() * 8 {
+                    return Err("reservoir underrun".into());
+                }
                 shortc[ch] = g.block_type == 2;
                 if shortc[ch] {
                     let sfs = read_scalefac_short(&mut br, g);
@@ -1158,7 +1441,9 @@ pub fn decode_pcm(data: &[u8]) -> Result<(Vec<i16>, u32, u16), String> {
                     let is = decode_is(&mut br, g, sfb, boundary);
                     br.pos = boundary;
                     let xr64 = requantize_long(&is, &sf, g, sfb);
-                    for i in 0..576 { xrc[ch][i] = xr64[i] as f32; }
+                    for i in 0..576 {
+                        xrc[ch][i] = xr64[i] as f32;
+                    }
                 }
             }
             if nch == 2 && *ms {

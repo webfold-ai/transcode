@@ -101,7 +101,11 @@ fn to_canon(fmt: Fmt, b: &[u8], i: usize) -> i32 {
         Fmt::I16 => (i16::from_le_bytes([b[i], b[i + 1]]) as i32) << 16,
         Fmt::I24 => {
             let raw = (b[i] as i32) | ((b[i + 1] as i32) << 8) | ((b[i + 2] as i32) << 16);
-            let signed = if raw & 0x80_0000 != 0 { raw | !0xFF_FFFF } else { raw }; // sign-extend 24→32
+            let signed = if raw & 0x80_0000 != 0 {
+                raw | !0xFF_FFFF
+            } else {
+                raw
+            }; // sign-extend 24→32
             signed << 8
         }
         Fmt::I32 => i32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]),
@@ -191,7 +195,12 @@ fn read_wav(path: &str) -> Result<Wav, String> {
         samples.push(to_canon(fmt, &b, i));
         i += bp;
     }
-    Ok(Wav { sample_rate: rate, channels, fmt, samples })
+    Ok(Wav {
+        sample_rate: rate,
+        channels,
+        fmt,
+        samples,
+    })
 }
 
 fn write_wav(path: &str, w: &Wav) -> Result<(), String> {
@@ -237,7 +246,11 @@ fn design_lowpass(l: usize, m: usize) -> Vec<i32> {
     let mut taps = Vec::with_capacity(len);
     for n in 0..len {
         let t = n as f64 - center;
-        let sinc = if t == 0.0 { 2.0 * fc } else { (2.0 * PI * fc * t).sin() / (PI * t) };
+        let sinc = if t == 0.0 {
+            2.0 * fc
+        } else {
+            (2.0 * PI * fc * t).sin() / (PI * t)
+        };
         let win = 0.5 - 0.5 * (2.0 * PI * n as f64 / (len - 1) as f64).cos();
         let h = sinc * win * (l as f64); // DC gain L → unity per polyphase
         taps.push((h * (1i64 << Q) as f64).round() as i32);
@@ -248,7 +261,11 @@ fn design_lowpass(l: usize, m: usize) -> Vec<i32> {
 // ─── polyphase rational resampler (fixed-point, canonical i32) ────────────────
 
 fn gcd(a: u32, b: u32) -> u32 {
-    if b == 0 { a } else { gcd(b, a % b) }
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
 }
 
 fn resample_channel(x: &[i32], l: usize, m: usize, taps: &[i32]) -> Vec<i32> {
@@ -308,7 +325,10 @@ fn transcode(w: &Wav, rate: u32, out_ch: u16, out_fmt: Fmt) -> Wav {
         let g = gcd(rate, w.sample_rate);
         let (l, m) = ((rate / g) as usize, (w.sample_rate / g) as usize);
         let taps = design_lowpass(l, m);
-        chans = chans.iter().map(|c| resample_channel(c, l, m, &taps)).collect();
+        chans = chans
+            .iter()
+            .map(|c| resample_channel(c, l, m, &taps))
+            .collect();
     }
 
     // channel remap
@@ -329,7 +349,12 @@ fn transcode(w: &Wav, rate: u32, out_ch: u16, out_fmt: Fmt) -> Wav {
         vec![chans[0].clone(); want]
     };
 
-    Wav { sample_rate: rate, channels: out_ch, fmt: out_fmt, samples: interleave(&chans) }
+    Wav {
+        sample_rate: rate,
+        channels: out_ch,
+        fmt: out_fmt,
+        samples: interleave(&chans),
+    }
 }
 
 // ─── synth + measurement (self-test) ──────────────────────────────────────────
@@ -341,7 +366,12 @@ fn synth_sine(rate: u32, freq: f64, secs: f64, amp_frac: f64) -> Wav {
         let t = i as f64 / rate as f64;
         samples.push((amp_frac * FS * (2.0 * PI * freq * t).sin()) as i32);
     }
-    Wav { sample_rate: rate, channels: 1, fmt: Fmt::I16, samples }
+    Wav {
+        sample_rate: rate,
+        channels: 1,
+        fmt: Fmt::I16,
+        samples,
+    }
 }
 
 fn goertzel(x: &[i32], rate: u32, freq: f64) -> f64 {
@@ -367,15 +397,29 @@ fn selftest() -> i32 {
         let sig = goertzel(&out.samples, fout, 1000.0);
         let noise = goertzel(&out.samples, fout, 5000.0).max(1e-9);
         let ok = (out.samples.len() as isize - exp as isize).abs() <= 2 && sig > 10.0 * noise;
-        if !ok { fails += 1; }
-        println!("  {fin:>5}->{fout:<5} out={:<6}(exp {exp})  1k/5k ratio={:>7.0}  [{}]",
-            out.samples.len(), sig / noise, if ok { "ok" } else { "FAIL" });
+        if !ok {
+            fails += 1;
+        }
+        println!(
+            "  {fin:>5}->{fout:<5} out={:<6}(exp {exp})  1k/5k ratio={:>7.0}  [{}]",
+            out.samples.len(),
+            sig / noise,
+            if ok { "ok" } else { "FAIL" }
+        );
     }
     println!("bit-depth round-trips (write → read, expect near-identity):");
     let base = synth_sine(16000, 1000.0, 0.1, 0.4);
     for &fmt in &[Fmt::U8, Fmt::I16, Fmt::I24, Fmt::I32, Fmt::F32] {
-        let path = format!("/tmp/_tc_rt_{}.wav", fmt.label().replace(' ', "_").replace('-', ""));
-        let w = Wav { sample_rate: 16000, channels: 1, fmt, samples: base.samples.clone() };
+        let path = format!(
+            "/tmp/_tc_rt_{}.wav",
+            fmt.label().replace(' ', "_").replace('-', "")
+        );
+        let w = Wav {
+            sample_rate: 16000,
+            channels: 1,
+            fmt,
+            samples: base.samples.clone(),
+        };
         write_wav(&path, &w).unwrap();
         let back = read_wav(&path).unwrap();
         // tolerance = the depth's quantisation step in canonical units
@@ -386,25 +430,53 @@ fn selftest() -> i32 {
             Fmt::F32 => 1 << 8, // f32 has a 23-bit mantissa → ~2^8 step at full scale
             Fmt::I32 => 2,
         };
-        let maxerr = base.samples.iter().zip(&back.samples)
-            .map(|(a, b)| (*a as i64 - *b as i64).abs()).max().unwrap_or(0);
+        let maxerr = base
+            .samples
+            .iter()
+            .zip(&back.samples)
+            .map(|(a, b)| (*a as i64 - *b as i64).abs())
+            .max()
+            .unwrap_or(0);
         let ok = back.fmt == fmt && back.samples.len() == base.samples.len() && maxerr <= tol;
-        if !ok { fails += 1; }
-        println!("  {:<13} maxerr={maxerr:>11} (tol {tol:>11})  [{}]", fmt.label(), if ok { "ok" } else { "FAIL" });
+        if !ok {
+            fails += 1;
+        }
+        println!(
+            "  {:<13} maxerr={maxerr:>11} (tol {tol:>11})  [{}]",
+            fmt.label(),
+            if ok { "ok" } else { "FAIL" }
+        );
     }
     println!("channel remap:");
-    let st = Wav { sample_rate: 16000, channels: 2, fmt: Fmt::I16,
-        samples: vec![100 << 16, 300 << 16, 100 << 16, 300 << 16] }; // L=100 R=300
+    let st = Wav {
+        sample_rate: 16000,
+        channels: 2,
+        fmt: Fmt::I16,
+        samples: vec![100 << 16, 300 << 16, 100 << 16, 300 << 16],
+    }; // L=100 R=300
     let mono = transcode(&st, 16000, 1, Fmt::I16);
     let mono_ok = mono.channels == 1 && mono.samples == vec![200 << 16, 200 << 16]; // avg
     let up = transcode(&mono, 16000, 2, Fmt::I16);
     let up_ok = up.channels == 2 && up.samples == vec![200 << 16, 200 << 16, 200 << 16, 200 << 16];
-    if !mono_ok { fails += 1; }
-    if !up_ok { fails += 1; }
-    println!("  stereo->mono avg [{}]   mono->stereo dup [{}]",
-        if mono_ok { "ok" } else { "FAIL" }, if up_ok { "ok" } else { "FAIL" });
+    if !mono_ok {
+        fails += 1;
+    }
+    if !up_ok {
+        fails += 1;
+    }
+    println!(
+        "  stereo->mono avg [{}]   mono->stereo dup [{}]",
+        if mono_ok { "ok" } else { "FAIL" },
+        if up_ok { "ok" } else { "FAIL" }
+    );
 
-    if fails == 0 { println!("\nselftest: all passed"); 0 } else { println!("\nselftest: {fails} FAILED"); 1 }
+    if fails == 0 {
+        println!("\nselftest: all passed");
+        0
+    } else {
+        println!("\nselftest: {fails} FAILED");
+        1
+    }
 }
 
 // ─── benchmark: throughput + compression ratio (std-only, reproducible) ────────
@@ -416,7 +488,10 @@ fn bench(secs: f64) -> i32 {
     let n = src.samples.len();
     let audio_s = n as f64 / rate as f64;
     let raw_bytes = n * bytes_per(Fmt::I16);
-    println!("bench: {audio_s:.1}s mono @ {rate} Hz = {n} samples ({} KiB raw i16)", raw_bytes / 1024);
+    println!(
+        "bench: {audio_s:.1}s mono @ {rate} Hz = {n} samples ({} KiB raw i16)",
+        raw_bytes / 1024
+    );
     println!("       synthetic 440 Hz tone — compression ratios are best-case (pure tone);");
     println!("       throughput is representative. real speech/music ratios will be lower.\n");
 
@@ -428,7 +503,10 @@ fn bench(secs: f64) -> i32 {
                 let ratio = raw_bytes as f64 / b as f64;
                 println!("  {label:<20} {:>8.2} ms  {xrt:>8.0}x realtime  {msps:>6.1} Msamp/s  ratio {ratio:>5.2}x ({} KiB)", elapsed * 1e3, b / 1024);
             }
-            None => println!("  {label:<20} {:>8.2} ms  {xrt:>8.0}x realtime  {msps:>6.1} Msamp/s", elapsed * 1e3),
+            None => println!(
+                "  {label:<20} {:>8.2} ms  {xrt:>8.0}x realtime  {msps:>6.1} Msamp/s",
+                elapsed * 1e3
+            ),
         }
     };
 
@@ -439,7 +517,11 @@ fn bench(secs: f64) -> i32 {
     let native_i32: Vec<i32> = src.samples.iter().map(|&v| v >> 16).collect();
     let t = Instant::now();
     let flac_bytes = flac::encode(&native_i32, rate, 1, 16);
-    report("FLAC encode", t.elapsed().as_secs_f64(), Some(flac_bytes.len()));
+    report(
+        "FLAC encode",
+        t.elapsed().as_secs_f64(),
+        Some(flac_bytes.len()),
+    );
     let t = Instant::now();
     match flac::decode(&flac_bytes) {
         Ok(_) => report("FLAC decode", t.elapsed().as_secs_f64(), None),
@@ -449,7 +531,11 @@ fn bench(secs: f64) -> i32 {
     let pcm_i16: Vec<i16> = src.samples.iter().map(|&v| (v >> 16) as i16).collect();
     let t = Instant::now();
     let aac_bytes = aac::encode_pcm(&pcm_i16, rate, 1, 128);
-    report("AAC-LC encode 128k", t.elapsed().as_secs_f64(), Some(aac_bytes.len()));
+    report(
+        "AAC-LC encode 128k",
+        t.elapsed().as_secs_f64(),
+        Some(aac_bytes.len()),
+    );
     let t = Instant::now();
     match aac::decode_pcm(&aac_bytes) {
         Ok(_) => report("AAC-LC decode", t.elapsed().as_secs_f64(), None),
@@ -458,14 +544,20 @@ fn bench(secs: f64) -> i32 {
 
     let t = Instant::now();
     let slac_bytes = codec::encode(&src.samples, rate, 1, Fmt::I16.code(), Fmt::I16.shift());
-    report("SLAC encode", t.elapsed().as_secs_f64(), Some(slac_bytes.len()));
+    report(
+        "SLAC encode",
+        t.elapsed().as_secs_f64(),
+        Some(slac_bytes.len()),
+    );
     let t = Instant::now();
     match codec::decode(&slac_bytes) {
         Ok(_) => report("SLAC decode", t.elapsed().as_secs_f64(), None),
         Err(e) => println!("  SLAC decode        FAILED: {e}"),
     }
 
-    println!("\n(MP3 + Opus decode need a real encoded file — this crate ships no MP3/Opus encoder.)");
+    println!(
+        "\n(MP3 + Opus decode need a real encoded file — this crate ships no MP3/Opus encoder.)"
+    );
     0
 }
 
@@ -505,7 +597,11 @@ fn main() {
                 let raw = (img.width * img.height * 3) as usize;
                 println!(
                     "{}x{} → {} : {} bytes (qp={}, {:.1}x vs raw RGB)",
-                    img.width, img.height, args[3], mp4.len(), qp,
+                    img.width,
+                    img.height,
+                    args[3],
+                    mp4.len(),
+                    qp,
                     raw as f64 / mp4.len() as f64,
                 );
             }
@@ -557,7 +653,13 @@ fn main() {
                 });
                 println!(
                     "{} frames {}x{} @ {}fps → {} : {} bytes (qp={})",
-                    frames.len(), w, h, fps, args[3], mp4.len(), qp,
+                    frames.len(),
+                    w,
+                    h,
+                    fps,
+                    args[3],
+                    mp4.len(),
+                    qp,
                 );
             }
             Err(e) => {
@@ -571,9 +673,20 @@ fn main() {
         match mp3::decode_pcm(&std::fs::read(&args[2]).unwrap_or_default()) {
             Ok((s, rate, ch)) => {
                 let samples: Vec<i32> = s.iter().map(|&v| (v as i32) << 16).collect();
-                let w = Wav { sample_rate: rate, channels: ch, fmt: Fmt::I16, samples };
+                let w = Wav {
+                    sample_rate: rate,
+                    channels: ch,
+                    fmt: Fmt::I16,
+                    samples,
+                };
                 write_wav(&args[3], &w).ok();
-                println!("decoded {} samples @ {} Hz, {} ch → {}", s.len(), rate, ch, args[3]);
+                println!(
+                    "decoded {} samples @ {} Hz, {} ch → {}",
+                    s.len(),
+                    rate,
+                    ch,
+                    args[3]
+                );
             }
             Err(e) => eprintln!("error: {e}"),
         }
@@ -648,7 +761,10 @@ fn main() {
                     args[2], i.channels, i.input_rate, i.pre_skip, i.audio_packets, i.samples, dur
                 );
             }
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -656,17 +772,39 @@ fn main() {
         // WAV → ADTS AAC-LC. Optional 5th arg = bitrate kbps (default 128).
         let w = match read_wav(&args[2]) {
             Ok(w) => w,
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         };
-        let kbps: u32 = if args.len() == 5 { args[4].parse().unwrap_or(128) } else { 128 };
+        let kbps: u32 = if args.len() == 5 {
+            args[4].parse().unwrap_or(128)
+        } else {
+            128
+        };
         let pcm: Vec<i16> = w.samples.iter().map(|&v| (v >> 16) as i16).collect();
         let bytes = aac::encode_pcm(&pcm, w.sample_rate, w.channels, kbps);
         let raw = w.samples.len() * 2;
-        let ratio = if bytes.is_empty() { 0.0 } else { raw as f64 / bytes.len() as f64 };
+        let ratio = if bytes.is_empty() {
+            0.0
+        } else {
+            raw as f64 / bytes.len() as f64
+        };
         match std::fs::write(&args[3], &bytes) {
-            Ok(()) => println!("AAC {} → {} : {} Hz, {} ch, {} kbps, {} B → {} B ({ratio:.2}x)",
-                args[2], args[3], w.sample_rate, w.channels, kbps, raw, bytes.len()),
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Ok(()) => println!(
+                "AAC {} → {} : {} Hz, {} ch, {} kbps, {} B → {} B ({ratio:.2}x)",
+                args[2],
+                args[3],
+                w.sample_rate,
+                w.channels,
+                kbps,
+                raw,
+                bytes.len()
+            ),
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -674,9 +812,20 @@ fn main() {
         match aac::decode_pcm(&std::fs::read(&args[2]).unwrap_or_default()) {
             Ok((s, rate, ch)) => {
                 let samples: Vec<i32> = s.iter().map(|&v| (v as i32) << 16).collect();
-                let w = Wav { sample_rate: rate, channels: ch, fmt: Fmt::I16, samples };
+                let w = Wav {
+                    sample_rate: rate,
+                    channels: ch,
+                    fmt: Fmt::I16,
+                    samples,
+                };
                 write_wav(&args[3], &w).ok();
-                println!("decoded {} samples @ {} Hz, {} ch → {}", s.len(), rate, ch, args[3]);
+                println!(
+                    "decoded {} samples @ {} Hz, {} ch → {}",
+                    s.len(),
+                    rate,
+                    ch,
+                    args[3]
+                );
             }
             Err(e) => eprintln!("error: {e}"),
         }
@@ -706,24 +855,38 @@ fn main() {
     if args.len() == 3 && args[1] == "--aac-info" {
         let bytes = match std::fs::read(&args[2]) {
             Ok(b) => b,
-            Err(e) => { eprintln!("read {}: {e}", args[2]); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("read {}: {e}", args[2]);
+                std::process::exit(1);
+            }
         };
         match aac::parse(&bytes) {
             Ok(i) => {
                 let dur = i.samples as f64 / i.samplerate as f64;
-                println!("{}: AAC profile {} (1=LC), {} Hz, {} ch, {} frames, {} samples/ch, {:.3}s",
-                    args[2], i.profile, i.samplerate, i.channels, i.frames, i.samples, dur);
+                println!(
+                    "{}: AAC profile {} (1=LC), {} Hz, {} ch, {} frames, {} samples/ch, {:.3}s",
+                    args[2], i.profile, i.samplerate, i.channels, i.frames, i.samples, dur
+                );
             }
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
     if args.len() == 3 && args[1] == "--mp3-requant" {
-        match mp3::requant_check(&std::fs::read(&args[2]).unwrap_or_default()) { Ok(s)=>println!("{s}"), Err(e)=>eprintln!("error: {e}") }
+        match mp3::requant_check(&std::fs::read(&args[2]).unwrap_or_default()) {
+            Ok(s) => println!("{s}"),
+            Err(e) => eprintln!("error: {e}"),
+        }
         return;
     }
     if args.len() == 3 && args[1] == "--mp3-spectral" {
-        match mp3::spectral_check(&std::fs::read(&args[2]).unwrap_or_default()) { Ok(s)=>println!("{s}"), Err(e)=>eprintln!("error: {e}") }
+        match mp3::spectral_check(&std::fs::read(&args[2]).unwrap_or_default()) {
+            Ok(s) => println!("{s}"),
+            Err(e) => eprintln!("error: {e}"),
+        }
         return;
     }
     if args.len() == 2 && args[1] == "--mp3-fb-test" {
@@ -738,16 +901,30 @@ fn main() {
     if args.len() == 3 && args[1] == "--mp3-info" {
         let bytes = match std::fs::read(&args[2]) {
             Ok(b) => b,
-            Err(e) => { eprintln!("read {}: {e}", args[2]); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("read {}: {e}", args[2]);
+                std::process::exit(1);
+            }
         };
         match mp3::parse(&bytes) {
             Ok(i) => {
                 let dur = i.samples as f64 / i.samplerate as f64;
-                println!("{}: MPEG{} Layer III, {} Hz, {} ch, {} frames, {} samples, {:.2}s, {}{} kbps",
+                println!(
+                    "{}: MPEG{} Layer III, {} Hz, {} ch, {} frames, {} samples, {:.2}s, {}{} kbps",
                     args[2],
-                    match i.version { mp3::Version::Mpeg1 => "1", mp3::Version::Mpeg2 => "2", mp3::Version::Mpeg25 => "2.5" },
-                    i.samplerate, i.channels, i.frames, i.samples, dur,
-                    if i.vbr { "VBR ~" } else { "" }, i.bitrate_kbps_first);
+                    match i.version {
+                        mp3::Version::Mpeg1 => "1",
+                        mp3::Version::Mpeg2 => "2",
+                        mp3::Version::Mpeg25 => "2.5",
+                    },
+                    i.samplerate,
+                    i.channels,
+                    i.frames,
+                    i.samples,
+                    dur,
+                    if i.vbr { "VBR ~" } else { "" },
+                    i.bitrate_kbps_first
+                );
                 match mp3::sideinfo_stats(&bytes) {
                     Ok(s) => println!("  {s}"),
                     Err(e) => eprintln!("  side-info: {e}"),
@@ -757,7 +934,10 @@ fn main() {
                     Err(e) => eprintln!("  reservoir: {e}"),
                 }
             }
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -765,20 +945,42 @@ fn main() {
         // real .flac → WAV
         let bytes = match std::fs::read(&args[2]) {
             Ok(b) => b,
-            Err(e) => { eprintln!("read {}: {e}", args[2]); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("read {}: {e}", args[2]);
+                std::process::exit(1);
+            }
         };
         match flac::decode(&bytes) {
             Ok((native, rate, channels, bps)) => {
                 let shift = 32 - bps;
                 let samples: Vec<i32> = native.iter().map(|&v| v << shift).collect();
-                let fmt = match bps { 8 => Fmt::U8, 24 => Fmt::I24, 32 => Fmt::I32, _ => Fmt::I16 };
-                let w = Wav { sample_rate: rate, channels, fmt, samples };
+                let fmt = match bps {
+                    8 => Fmt::U8,
+                    24 => Fmt::I24,
+                    32 => Fmt::I32,
+                    _ => Fmt::I16,
+                };
+                let w = Wav {
+                    sample_rate: rate,
+                    channels,
+                    fmt,
+                    samples,
+                };
                 match write_wav(&args[3], &w) {
-                    Ok(()) => println!("FLAC {} → {} : {} Hz, {} ch, {}-bit", args[2], args[3], rate, channels, bps),
-                    Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+                    Ok(()) => println!(
+                        "FLAC {} → {} : {} Hz, {} ch, {}-bit",
+                        args[2], args[3], rate, channels, bps
+                    ),
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
-            Err(e) => { eprintln!("decode error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("decode error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -786,18 +988,36 @@ fn main() {
         // WAV → real .flac (decodable by any FLAC decoder)
         let w = match read_wav(&args[2]) {
             Ok(w) => w,
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         };
         let sh = w.fmt.shift();
         let native: Vec<i32> = w.samples.iter().map(|&v| v >> sh).collect();
         let bps = 32 - sh;
         let bytes = flac::encode(&native, w.sample_rate, w.channels, bps);
         let raw = w.samples.len() * bytes_per(w.fmt);
-        let ratio = if bytes.is_empty() { 0.0 } else { raw as f64 / bytes.len() as f64 };
+        let ratio = if bytes.is_empty() {
+            0.0
+        } else {
+            raw as f64 / bytes.len() as f64
+        };
         match std::fs::write(&args[3], &bytes) {
-            Ok(()) => println!("FLAC {} → {} : {} Hz, {} ch, {}-bit, {} B → {} B ({ratio:.2}x)",
-                args[2], args[3], w.sample_rate, w.channels, bps, raw, bytes.len()),
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Ok(()) => println!(
+                "FLAC {} → {} : {} Hz, {} ch, {}-bit, {} B → {} B ({ratio:.2}x)",
+                args[2],
+                args[3],
+                w.sample_rate,
+                w.channels,
+                bps,
+                raw,
+                bytes.len()
+            ),
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -805,15 +1025,38 @@ fn main() {
         // WAV → SLAC (lossless)
         let w = match read_wav(&args[2]) {
             Ok(w) => w,
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         };
-        let bytes = codec::encode(&w.samples, w.sample_rate, w.channels, w.fmt.code(), w.fmt.shift());
+        let bytes = codec::encode(
+            &w.samples,
+            w.sample_rate,
+            w.channels,
+            w.fmt.code(),
+            w.fmt.shift(),
+        );
         let raw = w.samples.len() * bytes_per(w.fmt);
-        let ratio = if bytes.is_empty() { 0.0 } else { raw as f64 / bytes.len() as f64 };
+        let ratio = if bytes.is_empty() {
+            0.0
+        } else {
+            raw as f64 / bytes.len() as f64
+        };
         match std::fs::write(&args[3], &bytes) {
-            Ok(()) => println!("encoded {} → {} : {} ch, {}, {} B → {} B ({ratio:.2}x)",
-                args[2], args[3], w.channels, w.fmt.label(), raw, bytes.len()),
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Ok(()) => println!(
+                "encoded {} → {} : {} ch, {}, {} B → {} B ({ratio:.2}x)",
+                args[2],
+                args[3],
+                w.channels,
+                w.fmt.label(),
+                raw,
+                bytes.len()
+            ),
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -821,18 +1064,39 @@ fn main() {
         // SLAC → WAV
         let bytes = match std::fs::read(&args[2]) {
             Ok(b) => b,
-            Err(e) => { eprintln!("read {}: {e}", args[2]); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("read {}: {e}", args[2]);
+                std::process::exit(1);
+            }
         };
         match codec::decode(&bytes) {
             Ok((samples, rate, channels, fmt_code)) => {
                 let fmt = Fmt::from_code(fmt_code).unwrap_or(Fmt::I16);
-                let w = Wav { sample_rate: rate, channels, fmt, samples };
+                let w = Wav {
+                    sample_rate: rate,
+                    channels,
+                    fmt,
+                    samples,
+                };
                 match write_wav(&args[3], &w) {
-                    Ok(()) => println!("decoded {} → {} : {} Hz, {} ch, {}", args[2], args[3], rate, channels, fmt.label()),
-                    Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+                    Ok(()) => println!(
+                        "decoded {} → {} : {} Hz, {} ch, {}",
+                        args[2],
+                        args[3],
+                        rate,
+                        channels,
+                        fmt.label()
+                    ),
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
-            Err(e) => { eprintln!("decode error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("decode error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -843,7 +1107,10 @@ fn main() {
         let w = synth_sine(rate, freq, secs, 0.4);
         match write_wav(&args[2], &w) {
             Ok(()) => println!("gen {} : {rate} Hz, {freq} Hz tone, {secs}s", args[2]),
-            Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -856,26 +1123,57 @@ fn main() {
     let (inp, outp) = (args[1].clone(), args[2].clone());
     let w = match read_wav(&inp) {
         Ok(w) => w,
-        Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
     };
     let (mut rate, mut bits, mut chans) = (w.sample_rate, w.fmt, w.channels);
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
-            "--rate" if i + 1 < args.len() => { rate = args[i + 1].parse().unwrap_or(rate); i += 2; }
-            "--bits" if i + 1 < args.len() => {
-                match Fmt::parse(&args[i + 1]) { Some(f) => bits = f, None => { eprintln!("bad --bits {}", args[i + 1]); std::process::exit(2); } }
+            "--rate" if i + 1 < args.len() => {
+                rate = args[i + 1].parse().unwrap_or(rate);
                 i += 2;
             }
-            "--channels" if i + 1 < args.len() => { chans = args[i + 1].parse().unwrap_or(chans); i += 2; }
-            other => { eprintln!("unknown arg: {other}"); std::process::exit(2); }
+            "--bits" if i + 1 < args.len() => {
+                match Fmt::parse(&args[i + 1]) {
+                    Some(f) => bits = f,
+                    None => {
+                        eprintln!("bad --bits {}", args[i + 1]);
+                        std::process::exit(2);
+                    }
+                }
+                i += 2;
+            }
+            "--channels" if i + 1 < args.len() => {
+                chans = args[i + 1].parse().unwrap_or(chans);
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown arg: {other}");
+                std::process::exit(2);
+            }
         }
     }
-    println!("in : {} Hz, {} ch, {}", w.sample_rate, w.channels, w.fmt.label());
+    println!(
+        "in : {} Hz, {} ch, {}",
+        w.sample_rate,
+        w.channels,
+        w.fmt.label()
+    );
     let out = transcode(&w, rate, chans, bits);
-    println!("out: {} Hz, {} ch, {}", out.sample_rate, out.channels, out.fmt.label());
+    println!(
+        "out: {} Hz, {} ch, {}",
+        out.sample_rate,
+        out.channels,
+        out.fmt.label()
+    );
     match write_wav(&outp, &out) {
         Ok(()) => println!("wrote {outp}"),
-        Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
     }
 }

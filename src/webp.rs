@@ -10,11 +10,16 @@
 /// Encode `pixels` (RGBA8, row-major, `width * height * 4` bytes) as a lossless WebP file.
 pub fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 || width > 16_384 || height > 16_384 {
-        return Err(format!("webp: dimensions {width}x{height} out of range (1..=16384)"));
+        return Err(format!(
+            "webp: dimensions {width}x{height} out of range (1..=16384)"
+        ));
     }
     let expected = width as usize * height as usize * 4;
     if pixels.len() != expected {
-        return Err(format!("webp: expected {expected} RGBA bytes, got {}", pixels.len()));
+        return Err(format!(
+            "webp: expected {expected} RGBA bytes, got {}",
+            pixels.len()
+        ));
     }
 
     let mut bits = BitWriter::default();
@@ -57,7 +62,9 @@ fn write_flat_literal_code(bits: &mut BitWriter, alphabet: usize) {
     bits.put(0, 1);
     // Code-length code: only symbols 0 and 8 are used, each with length 1. The order table
     // below is fixed by the spec; symbol 8 sits at index 11, so 12 entries are sent.
-    const ORDER: [usize; 19] = [17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    const ORDER: [usize; 19] = [
+        17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ];
     let needed = ORDER.iter().position(|&s| s == 8).map_or(0, |p| p + 1);
     bits.put((needed - 4) as u32, 4);
     for &sym in ORDER.iter().take(needed) {
@@ -137,7 +144,16 @@ mod tests {
     #[test]
     fn round_trips_every_pixel_exactly() {
         let (w, h) = (5u32, 3u32);
-        let pixels: Vec<u8> = (0..w * h).flat_map(|i| [(i * 37) as u8, (i * 91) as u8, (i * 13) as u8, (255 - i) as u8]).collect();
+        let pixels: Vec<u8> = (0..w * h)
+            .flat_map(|i| {
+                [
+                    (i * 37) as u8,
+                    (i * 91) as u8,
+                    (i * 13) as u8,
+                    (255 - i) as u8,
+                ]
+            })
+            .collect();
         let webp = encode(w, h, &pixels).expect("encode");
         assert_eq!(&webp[0..4], b"RIFF");
         assert_eq!(&webp[8..12], b"WEBP");

@@ -35,7 +35,9 @@ fn sm_weights(n: usize) -> &'static [u8] {
     match n {
         4 => &[255, 149, 85, 64],
         8 => &[255, 197, 146, 105, 73, 50, 37, 32],
-        16 => &[255, 225, 196, 170, 145, 123, 102, 84, 68, 54, 43, 33, 26, 20, 17, 16],
+        16 => &[
+            255, 225, 196, 170, 145, 123, 102, 84, 68, 54, 43, 33, 26, 20, 17, 16,
+        ],
         32 => &[
             255, 240, 225, 210, 196, 182, 169, 157, 145, 133, 122, 111, 101, 92, 83, 74, 66, 59,
             52, 45, 39, 34, 29, 25, 21, 17, 14, 12, 10, 9, 8, 8,
@@ -133,9 +135,21 @@ pub fn predict(mode: Mode, n: usize, top: &[u8], left: &[u8], topleft: u8) -> Ve
 /// Pick the intra mode minimising the sum of absolute residual (SAD) against
 /// the actual block, and return `(mode, residual)`. This is the encoder's
 /// per-block decision; residual is `block[i] - pred[i]` as i16.
-pub fn choose_mode(n: usize, block: &[u8], top: &[u8], left: &[u8], topleft: u8) -> (Mode, Vec<i16>) {
+pub fn choose_mode(
+    n: usize,
+    block: &[u8],
+    top: &[u8],
+    left: &[u8],
+    topleft: u8,
+) -> (Mode, Vec<i16>) {
     const MODES: [Mode; 7] = [
-        Mode::Dc, Mode::Vert, Mode::Horz, Mode::Paeth, Mode::Smooth, Mode::SmoothV, Mode::SmoothH,
+        Mode::Dc,
+        Mode::Vert,
+        Mode::Horz,
+        Mode::Paeth,
+        Mode::Smooth,
+        Mode::SmoothV,
+        Mode::SmoothH,
     ];
     let mut best_mode = Mode::Dc;
     let mut best_sad = u64::MAX;
@@ -171,7 +185,15 @@ mod tests {
         for &n in &[4usize, 8, 16, 32] {
             let top = vec![120u8; n];
             let left = vec![120u8; n];
-            for m in [Mode::Dc, Mode::Vert, Mode::Horz, Mode::Paeth, Mode::Smooth, Mode::SmoothV, Mode::SmoothH] {
+            for m in [
+                Mode::Dc,
+                Mode::Vert,
+                Mode::Horz,
+                Mode::Paeth,
+                Mode::Smooth,
+                Mode::SmoothV,
+                Mode::SmoothH,
+            ] {
                 let p = predict(m, n, &top, &left, 120);
                 assert!(
                     p.iter().all(|&v| (v as i32 - 120).abs() <= 1),
@@ -233,14 +255,25 @@ mod tests {
         }
         let (mode, resid) = choose_mode(n, &block, &top, &left, top[0]);
         let energy: i64 = resid.iter().map(|&r| (r as i64).abs()).sum();
-        assert_eq!(mode, Mode::Vert, "should pick vertical for a vertical block");
-        assert_eq!(energy, 0, "vertical block must have zero residual under Vert");
+        assert_eq!(
+            mode,
+            Mode::Vert,
+            "should pick vertical for a vertical block"
+        );
+        assert_eq!(
+            energy, 0,
+            "vertical block must have zero residual under Vert"
+        );
     }
 
     #[test]
     fn smooth_weights_present_for_all_sizes() {
         for &n in &[4usize, 8, 16, 32] {
-            assert_eq!(sm_weights(n).len(), n, "smooth weights wrong length for {n}");
+            assert_eq!(
+                sm_weights(n).len(),
+                n,
+                "smooth weights wrong length for {n}"
+            );
         }
     }
 }

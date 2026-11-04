@@ -340,10 +340,8 @@ fn assemble(
     u16be(&mut tkhd_rest, 0); // alternate_group
     u16be(&mut tkhd_rest, 0); // volume (0 for video)
     u16be(&mut tkhd_rest, 0); // reserved
-    // unity transformation matrix
-    for &v in &[
-        0x0001_0000u32, 0, 0, 0, 0x0001_0000, 0, 0, 0, 0x4000_0000,
-    ] {
+                              // unity transformation matrix
+    for &v in &[0x0001_0000u32, 0, 0, 0, 0x0001_0000, 0, 0, 0, 0x4000_0000] {
         u32be(&mut tkhd_rest, v);
     }
     u32be(&mut tkhd_rest, width << 16); // width (16.16 fixed)
@@ -367,9 +365,7 @@ fn assemble(
     for _ in 0..2 {
         u32be(&mut mvhd_rest, 0); // reserved[2]
     }
-    for &v in &[
-        0x0001_0000u32, 0, 0, 0, 0x0001_0000, 0, 0, 0, 0x4000_0000,
-    ] {
+    for &v in &[0x0001_0000u32, 0, 0, 0, 0x0001_0000, 0, 0, 0, 0x4000_0000] {
         u32be(&mut mvhd_rest, v);
     }
     for _ in 0..6 {
@@ -478,7 +474,11 @@ mod tests {
             assert!(p + size <= data.len(), "box {:?} overruns file", tag);
             p += size;
         }
-        assert_eq!(p, data.len(), "top-level boxes do not tile the file exactly");
+        assert_eq!(
+            p,
+            data.len(),
+            "top-level boxes do not tile the file exactly"
+        );
         tags
     }
 

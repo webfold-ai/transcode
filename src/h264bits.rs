@@ -15,7 +15,11 @@ pub struct BitWriter {
 
 impl BitWriter {
     pub fn new() -> Self {
-        BitWriter { buf: Vec::new(), cur: 0, nbits: 0 }
+        BitWriter {
+            buf: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
     }
     pub fn put_bit(&mut self, b: u32) {
         self.cur = (self.cur << 1) | ((b & 1) as u8);
@@ -43,7 +47,11 @@ impl BitWriter {
         self.put_bits(code, nbits);
     }
     pub fn se(&mut self, v: i32) {
-        let mapped = if v <= 0 { (-2 * v) as u32 } else { (2 * v - 1) as u32 };
+        let mapped = if v <= 0 {
+            (-2 * v) as u32
+        } else {
+            (2 * v - 1) as u32
+        };
         self.ue(mapped);
     }
     pub fn byte_aligned(&self) -> bool {

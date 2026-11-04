@@ -241,8 +241,25 @@ mod tests {
         assert!(tags.iter().any(|t| t == b"mdat"));
         // required HEIF item-structure boxes present somewhere
         let find = |n: &[u8]| heif.windows(n.len()).any(|w| w == n);
-        for need in [&b"mif1"[..], b"hdlr", b"pict", b"pitm", b"iinf", b"infe", b"avc1", b"avcC", b"ispe", b"iprp", b"ipma", b"iloc"] {
-            assert!(find(need), "missing required HEIF box/marker {:?}", std::str::from_utf8(need).unwrap());
+        for need in [
+            &b"mif1"[..],
+            b"hdlr",
+            b"pict",
+            b"pitm",
+            b"iinf",
+            b"infe",
+            b"avc1",
+            b"avcC",
+            b"ispe",
+            b"iprp",
+            b"ipma",
+            b"iloc",
+        ] {
+            assert!(
+                find(need),
+                "missing required HEIF box/marker {:?}",
+                std::str::from_utf8(need).unwrap()
+            );
         }
         // it must NOT claim the heic brand (we have no HEVC)
         assert!(!find(b"heic"), "must not claim heic brand without HEVC");
@@ -272,8 +289,14 @@ mod tests {
             heif[mdat_payload + 2],
             heif[mdat_payload + 3],
         ]) as usize;
-        assert!(nal_len > 0 && mdat_payload + 4 + nal_len <= heif.len(), "mdat extent sane");
+        assert!(
+            nal_len > 0 && mdat_payload + 4 + nal_len <= heif.len(),
+            "mdat extent sane"
+        );
         let nal_type = heif[mdat_payload + 4] & 0x1F;
-        assert_eq!(nal_type, 5, "first item NAL should be an IDR slice (type 5)");
+        assert_eq!(
+            nal_type, 5,
+            "first item NAL should be an IDR slice (type 5)"
+        );
     }
 }

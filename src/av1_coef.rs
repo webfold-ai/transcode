@@ -27,8 +27,9 @@ fn bcdf(arg: u16) -> [u16; 2] {
     [32768 - arg, 0]
 }
 
-const EOB_BIN_1024_L: [u16; 10] =
-    [6698, 8334, 11961, 15762, 20186, 23862, 27434, 29326, 31082, 32050];
+const EOB_BIN_1024_L: [u16; 10] = [
+    6698, 8334, 11961, 15762, 20186, 23862, 27434, 29326, 31082, 32050,
+];
 // EOB_HI_BIT_64 (= eob_hi_bit[4][0]) comes from av1_coef_tables (the correct
 // TX_64X64 context; an earlier hardcode used [0][0] and desynced — caught by
 // the dav1d symbol trace).
@@ -73,11 +74,23 @@ fn lo_ctx_2d(levels: &[u8], rc: usize, x: usize, y: usize) -> (usize, u32) {
     let hi_mag = mag;
     mag += l(2) + l(2 * STRIDE);
     let offset = LO_CTX_OFFSETS_2D[y.min(4)][x.min(4)] as usize;
-    (offset + if mag > 512 { 4 } else { ((mag + 64) >> 7) as usize }, hi_mag)
+    (
+        offset
+            + if mag > 512 {
+                4
+            } else {
+                ((mag + 64) >> 7) as usize
+            },
+        hi_mag,
+    )
 }
 
 fn level_byte(tok: u32, is_hi: bool) -> u8 {
-    if is_hi { (tok + 0xc0) as u8 } else { (tok.wrapping_mul(0x41)) as u8 }
+    if is_hi {
+        (tok + 0xc0) as u8
+    } else {
+        (tok.wrapping_mul(0x41)) as u8
+    }
 }
 
 /// hi_tok (br_tok): base-3 with 3=continue. `hint` = full |level| on encode.
@@ -170,13 +183,21 @@ fn code_block<C: Coder>(c: &mut C, cdf: &mut CoefCdf, coeffs: &mut [i32]) -> boo
     if eob == 0 {
         // dc-only: DC via eob_base_tok[0]
         let h = coeffs[0].unsigned_abs();
-        let et = c.symbol(&mut cdf.eob_base_tok[0], 3, h.min(3).saturating_sub(1) as usize);
+        let et = c.symbol(
+            &mut cdf.eob_base_tok[0],
+            3,
+            h.min(3).saturating_sub(1) as usize,
+        );
         let mut tok = et as u32 + 1;
         if et == 2 {
             tok = code_hi_tok(c, &mut cdf.br_tok[0], h);
         }
         let sign = c.bool_adapt(&mut cdf.dc_sign, coeffs[0] < 0);
-        let full = if tok == 15 { 15 + code_golomb(c, h.saturating_sub(15)) } else { tok };
+        let full = if tok == 15 {
+            15 + code_golomb(c, h.saturating_sub(15))
+        } else {
+            tok
+        };
         coeffs[0] = if sign { -(full as i32) } else { full as i32 };
         return true;
     }
@@ -186,7 +207,11 @@ fn code_block<C: Coder>(c: &mut C, cdf: &mut CoefCdf, coeffs: &mut [i32]) -> boo
     let (xe, ye) = (rc_e >> SHIFT, rc_e & MASK);
     let eob_ctx = 1 + (eob > (2 << 6)) as usize + (eob > (4 << 6)) as usize;
     let he = coeffs[rc_e].unsigned_abs();
-    let et = c.symbol(&mut cdf.eob_base_tok[eob_ctx], 3, he.min(3).saturating_sub(1) as usize);
+    let et = c.symbol(
+        &mut cdf.eob_base_tok[eob_ctx],
+        3,
+        he.min(3).saturating_sub(1) as usize,
+    );
     let tok_e = if et == 2 {
         let hctx = if (xe | ye) > 1 { 14 } else { 7 };
         let t = code_hi_tok(c, &mut cdf.br_tok[hctx], he);
@@ -210,7 +235,12 @@ fn code_block<C: Coder>(c: &mut C, cdf: &mut CoefCdf, coeffs: &mut [i32]) -> boo
             let (_, hi_mag) = lo_ctx_2d(&levels, rc, x, y);
             let mag = hi_mag & 63;
             let yy = (y | x) as u32;
-            let hctx = (if yy > 1 { 14 } else { 7 }) + if mag > 12 { 6 } else { ((mag + 1) >> 1) as usize };
+            let hctx = (if yy > 1 { 14 } else { 7 })
+                + if mag > 12 {
+                    6
+                } else {
+                    ((mag + 1) >> 1) as usize
+                };
             let t = code_hi_tok(c, &mut cdf.br_tok[hctx], h);
             levels[rc] = level_byte(t, true);
             t
@@ -226,7 +256,11 @@ fn code_block<C: Coder>(c: &mut C, cdf: &mut CoefCdf, coeffs: &mut [i32]) -> boo
     let base = c.symbol(&mut cdf.base_tok[0], 4, h0.min(3) as usize) as u32;
     let tok0 = if base == 3 {
         let mag = (levels[STRIDE] as u32 + levels[1] as u32 + levels[STRIDE + 1] as u32) & 63;
-        let hctx = if mag > 12 { 6 } else { ((mag + 1) >> 1) as usize };
+        let hctx = if mag > 12 {
+            6
+        } else {
+            ((mag + 1) >> 1) as usize
+        };
         code_hi_tok(c, &mut cdf.br_tok[hctx], h0)
     } else {
         base
@@ -235,14 +269,26 @@ fn code_block<C: Coder>(c: &mut C, cdf: &mut CoefCdf, coeffs: &mut [i32]) -> boo
 
     // ── signs + golomb: dc_sign (+dc golomb), then AC signs (increasing scan) ──
     let dsign = c.bool_adapt(&mut cdf.dc_sign, coeffs[0] < 0);
-    let dc_full = if tok0 == 15 { 15 + code_golomb(c, h0.saturating_sub(15)) } else { tok0 };
-    coeffs[0] = if dsign { -(dc_full as i32) } else { dc_full as i32 };
+    let dc_full = if tok0 == 15 {
+        15 + code_golomb(c, h0.saturating_sub(15))
+    } else {
+        tok0
+    };
+    coeffs[0] = if dsign {
+        -(dc_full as i32)
+    } else {
+        dc_full as i32
+    };
     for i in 1..=eob {
         let rc = SCAN_32X32[i] as usize;
         let t = tok_at[rc];
         if t != 0 {
             let sign = c.bit((coeffs[rc] < 0) as u32) == 1;
-            let full = if t == 15 { 15 + code_golomb(c, coeffs[rc].unsigned_abs().saturating_sub(15)) } else { t };
+            let full = if t == 15 {
+                15 + code_golomb(c, coeffs[rc].unsigned_abs().saturating_sub(15))
+            } else {
+                t
+            };
             coeffs[rc] = if sign { -(full as i32) } else { full as i32 };
         }
     }
@@ -275,12 +321,12 @@ mod tests {
     #[test]
     fn coeff_block_roundtrips() {
         let cases: &[&[(usize, i32)]] = &[
-            &[],                                    // empty (all_zero)
-            &[(0, 1)],                              // DC only, +1
-            &[(0, -7)],                             // DC only, -7 (hi_tok)
-            &[(0, 2), (32, 1), (1, 3)],             // DC + 2 AC (scan 0,1,2)
-            &[(0, 40)],                             // DC golomb (level>15)
-            &[(0, -3), (32, -20), (1, 2), (2, 9)],  // mixed signs + golomb AC
+            &[],                                                  // empty (all_zero)
+            &[(0, 1)],                                            // DC only, +1
+            &[(0, -7)],                                           // DC only, -7 (hi_tok)
+            &[(0, 2), (32, 1), (1, 3)],                           // DC + 2 AC (scan 0,1,2)
+            &[(0, 40)],                                           // DC golomb (level>15)
+            &[(0, -3), (32, -20), (1, 2), (2, 9)],                // mixed signs + golomb AC
             &[(0, 1), (1, 1), (2, 1), (33, 1), (64, 1), (96, 1)], // a run of AC
         ];
         for (ci, case) in cases.iter().enumerate() {
@@ -298,7 +344,10 @@ mod tests {
             let mut out = vec![0i32; 1024];
             decode_block_2d(&mut r, &mut dec_cdf, &mut out);
             assert_eq!(out, coeffs, "case {ci} round-trip mismatch");
-            assert_eq!(enc_cdf.base_tok, dec_cdf.base_tok, "case {ci} CDF adaptation diverged");
+            assert_eq!(
+                enc_cdf.base_tok, dec_cdf.base_tok,
+                "case {ci} CDF adaptation diverged"
+            );
         }
     }
 }

@@ -28,10 +28,22 @@ use crate::h264bits::{build_pps, build_sps, emit_nal, rgb_to_ycbcr601_limited};
 
 // luma4x4BlkIdx → (x,y) pixel offset within the 16×16 MB (H.264 Z-order).
 const BLK_XY: [(usize, usize); 16] = [
-    (0, 0), (4, 0), (0, 4), (4, 4),
-    (8, 0), (12, 0), (8, 4), (12, 4),
-    (0, 8), (4, 8), (0, 12), (4, 12),
-    (8, 8), (12, 8), (8, 12), (12, 12),
+    (0, 0),
+    (4, 0),
+    (0, 4),
+    (4, 4),
+    (8, 0),
+    (12, 0),
+    (8, 4),
+    (12, 4),
+    (0, 8),
+    (4, 8),
+    (0, 12),
+    (4, 12),
+    (8, 8),
+    (12, 8),
+    (8, 12),
+    (12, 12),
 ];
 
 // zig-zag scan for a 4×4 block (frequency order used by CAVLC).
@@ -244,7 +256,11 @@ impl<'a> Cavlc<'a> {
         let mut suffix_length: u32 = if tc > 10 && t1 < 3 { 1 } else { 0 };
         for j in t1..tc {
             let level = nz[tc - 1 - j].1;
-            let mut level_code: i32 = if level > 0 { (level << 1) - 2 } else { (-level << 1) - 1 };
+            let mut level_code: i32 = if level > 0 {
+                (level << 1) - 2
+            } else {
+                (-level << 1) - 1
+            };
             if j == t1 && t1 < 3 {
                 level_code -= 2;
             }
@@ -263,7 +279,8 @@ impl<'a> Cavlc<'a> {
                 let prefix = lc >> suffix_length;
                 if prefix < 15 {
                     self.put_level_prefix(prefix);
-                    self.bw.put_bits(lc & ((1 << suffix_length) - 1), suffix_length);
+                    self.bw
+                        .put_bits(lc & ((1 << suffix_length) - 1), suffix_length);
                 } else {
                     self.put_level_prefix(15);
                     let escape = lc - (15u32 << suffix_length);
@@ -325,7 +342,12 @@ impl<'a> Cavlc<'a> {
 }
 
 /// Encode a sequence of RGBA8 frames as intra-only (all-IDR) compressed H.264.
-pub fn encode_sequence(frames: &[Vec<u8>], width: u32, height: u32, qp: i32) -> Result<Vec<u8>, String> {
+pub fn encode_sequence(
+    frames: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    qp: i32,
+) -> Result<Vec<u8>, String> {
     if frames.is_empty() {
         return Err("H264-intra: no frames".into());
     }
@@ -370,7 +392,13 @@ pub fn encode_sequence_with_recon(
     Ok((out, recons))
 }
 
-fn encode_idr_intra(width: u32, height: u32, rgba: &[u8], qp: i32, idr: u32) -> Result<Vec<u8>, String> {
+fn encode_idr_intra(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    qp: i32,
+    idr: u32,
+) -> Result<Vec<u8>, String> {
     Ok(encode_idr_intra_recon(width, height, rgba, qp, idr)?.0)
 }
 
@@ -507,11 +535,30 @@ fn encode_idr_i4x4_recon(
             }
             // chroma (shared path) — always coded, so CBPChroma ≥ 1
             let cm = encode_chroma_mb(
-                &src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t,
+                &src_cb,
+                &src_cr,
+                &mut rec_cb,
+                &mut rec_cr,
+                cw,
+                mbx,
+                mby,
+                qp,
+                avail_l,
+                avail_t,
             );
             emit_mb_i4x4(
-                &mut bw, &luma, cbp_luma, &cm, &mut nz_luma, lw4, &mut mode_grid,
-                &mut nz_cb, &mut nz_cr, cw4, mbx, mby,
+                &mut bw,
+                &luma,
+                cbp_luma,
+                &cm,
+                &mut nz_luma,
+                lw4,
+                &mut mode_grid,
+                &mut nz_cb,
+                &mut nz_cr,
+                cw4,
+                mbx,
+                mby,
             );
         }
     }
@@ -540,7 +587,14 @@ fn encode_idr_i4x4_recon(
 /// macroblock — the distortion term `D` of the free energy. `rec` is indexed by
 /// the padded stride `pw`; `recon` (when Some) overrides `rec` with a private
 /// 16×16 candidate buffer (raster within the MB).
-fn ssd_luma_mb(rec: &[u8], recon: Option<&[u8; 256]>, src: &[u8], pw: usize, mbx: usize, mby: usize) -> u64 {
+fn ssd_luma_mb(
+    rec: &[u8],
+    recon: Option<&[u8; 256]>,
+    src: &[u8],
+    pw: usize,
+    mbx: usize,
+    mby: usize,
+) -> u64 {
     let mut s = 0u64;
     for yy in 0..16 {
         for xx in 0..16 {
@@ -593,7 +647,13 @@ pub fn encode_sequence_adaptive_with_recon(
 
 /// Encode one IDR frame with the adaptive per-MB type decision, returning just
 /// the slice RBSP (no NAL framing). Used by the MP4 muxer track builder.
-pub fn encode_idr_adaptive(width: u32, height: u32, rgba: &[u8], qp: i32, idr: u32) -> Result<Vec<u8>, String> {
+pub fn encode_idr_adaptive(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    qp: i32,
+    idr: u32,
+) -> Result<Vec<u8>, String> {
     Ok(encode_idr_adaptive_recon(width, height, rgba, qp, idr)?.0)
 }
 
@@ -686,7 +746,16 @@ fn encode_idr_adaptive_recon(
             // Chroma is identical for both luma types (independent of luma) —
             // compute and commit once; it adds an equal constant to both costs.
             let cm = encode_chroma_mb(
-                &src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t,
+                &src_cb,
+                &src_cr,
+                &mut rec_cb,
+                &mut rec_cr,
+                cw,
+                mbx,
+                mby,
+                qp,
+                avail_l,
+                avail_t,
             );
 
             // ── candidate A: I_4x4 (writes its reconstruction into rec_y) ──
@@ -701,14 +770,34 @@ fn encode_idr_adaptive_recon(
             }
             let d4 = ssd_luma_mb(&rec_y, None, &src_y, pw, mbx, mby);
             let r4 = trial_rate_i4x4(
-                &i4, cbp_luma4, &cm, &mut nz_luma, lw4, &mut mode_grid, &mut nz_cb, &mut nz_cr, cw4, mbx, mby,
+                &i4,
+                cbp_luma4,
+                &cm,
+                &mut nz_luma,
+                lw4,
+                &mut mode_grid,
+                &mut nz_cb,
+                &mut nz_cr,
+                cw4,
+                mbx,
+                mby,
             );
 
             // ── candidate B: I_16x16 (private recon; reads only out-of-MB
             // neighbours, so I_4x4's interior writes don't perturb it) ──
             let i16 = encode_luma_i16(&src_y, &rec_y, pw, mbx, mby, qp, avail_l, avail_t);
             let d16 = ssd_luma_mb(&rec_y, Some(&i16.recon), &src_y, pw, mbx, mby);
-            let r16 = trial_rate_i16(&i16, &cm, &mut nz_luma, lw4, &mut nz_cb, &mut nz_cr, cw4, mbx, mby);
+            let r16 = trial_rate_i16(
+                &i16,
+                &cm,
+                &mut nz_luma,
+                lw4,
+                &mut nz_cb,
+                &mut nz_cr,
+                cw4,
+                mbx,
+                mby,
+            );
 
             // ── free-energy collapse: P(type) = δ(type − argmin F) ──
             let f4 = d4 as f64 + lambda * r4 as f64;
@@ -720,7 +809,18 @@ fn encode_idr_adaptive_recon(
                         rec_y[(mby * 16 + yy) * pw + (mbx * 16 + xx)] = i16.recon[yy * 16 + xx];
                     }
                 }
-                emit_mb_i16(&mut bw, &i16, &cm, &mut nz_luma, lw4, &mut nz_cb, &mut nz_cr, cw4, mbx, mby);
+                emit_mb_i16(
+                    &mut bw,
+                    &i16,
+                    &cm,
+                    &mut nz_luma,
+                    lw4,
+                    &mut nz_cb,
+                    &mut nz_cr,
+                    cw4,
+                    mbx,
+                    mby,
+                );
                 // an I_16x16 MB contributes DC (mode 2) to neighbours' MPM
                 for fy in mby * 4..mby * 4 + 4 {
                     for fx in mbx * 4..mbx * 4 + 4 {
@@ -730,8 +830,18 @@ fn encode_idr_adaptive_recon(
             } else {
                 // rec_y already holds the I_4x4 reconstruction
                 emit_mb_i4x4(
-                    &mut bw, &i4, cbp_luma4, &cm, &mut nz_luma, lw4, &mut mode_grid,
-                    &mut nz_cb, &mut nz_cr, cw4, mbx, mby,
+                    &mut bw,
+                    &i4,
+                    cbp_luma4,
+                    &cm,
+                    &mut nz_luma,
+                    lw4,
+                    &mut mode_grid,
+                    &mut nz_cb,
+                    &mut nz_cr,
+                    cw4,
+                    mbx,
+                    mby,
                 );
             }
         }
@@ -762,16 +872,26 @@ fn encode_idr_adaptive_recon(
 /// read live from the committed grids, which is correct.
 #[allow(clippy::too_many_arguments)]
 fn trial_rate_i4x4(
-    luma: &crate::h264_i4x4::I4x4Luma, cbp_luma: u32, cm: &ChromaMb,
-    nz_luma: &mut [i32], lw4: usize, mode_grid: &mut [i32], nz_cb: &mut [i32], nz_cr: &mut [i32],
-    cw4: usize, mbx: usize, mby: usize,
+    luma: &crate::h264_i4x4::I4x4Luma,
+    cbp_luma: u32,
+    cm: &ChromaMb,
+    nz_luma: &mut [i32],
+    lw4: usize,
+    mode_grid: &mut [i32],
+    nz_cb: &mut [i32],
+    nz_cr: &mut [i32],
+    cw4: usize,
+    mbx: usize,
+    mby: usize,
 ) -> usize {
     let sl = snap_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4);
     let sm = snap_rect(mode_grid, lw4, mbx * 4, mby * 4, 4, 4);
     let sb = snap_rect(nz_cb, cw4, mbx * 2, mby * 2, 2, 2);
     let sr = snap_rect(nz_cr, cw4, mbx * 2, mby * 2, 2, 2);
     let mut tb = BitWriter::new();
-    emit_mb_i4x4(&mut tb, luma, cbp_luma, cm, nz_luma, lw4, mode_grid, nz_cb, nz_cr, cw4, mbx, mby);
+    emit_mb_i4x4(
+        &mut tb, luma, cbp_luma, cm, nz_luma, lw4, mode_grid, nz_cb, nz_cr, cw4, mbx, mby,
+    );
     let bits = tb.bit_len();
     restore_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4, &sl);
     restore_rect(mode_grid, lw4, mbx * 4, mby * 4, 4, 4, &sm);
@@ -784,8 +904,15 @@ fn trial_rate_i4x4(
 /// [`trial_rate_i4x4`]; I_16x16 does not touch the mode grid.
 #[allow(clippy::too_many_arguments)]
 fn trial_rate_i16(
-    i16: &I16Luma, cm: &ChromaMb,
-    nz_luma: &mut [i32], lw4: usize, nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize, mbx: usize, mby: usize,
+    i16: &I16Luma,
+    cm: &ChromaMb,
+    nz_luma: &mut [i32],
+    lw4: usize,
+    nz_cb: &mut [i32],
+    nz_cr: &mut [i32],
+    cw4: usize,
+    mbx: usize,
+    mby: usize,
 ) -> usize {
     let sl = snap_rect(nz_luma, lw4, mbx * 4, mby * 4, 4, 4);
     let sb = snap_rect(nz_cb, cw4, mbx * 2, mby * 2, 2, 2);
@@ -868,7 +995,7 @@ pub(crate) fn encode_idr_intra_recon(
     let lw4 = pw / 4;
     let lh4 = ph / 4;
     let mut nz_luma = vec![-1i32; lw4 * lh4]; // -1 = not yet coded
-    // chroma 4×4 TotalCoeff grids (cw/4 × ch/4) for chroma-AC nC context, per plane
+                                              // chroma 4×4 TotalCoeff grids (cw/4 × ch/4) for chroma-AC nC context, per plane
     let cw4 = cw / 4;
     let ch4 = ch / 4;
     let mut nz_cb = vec![-1i32; cw4 * ch4];
@@ -885,9 +1012,9 @@ pub(crate) fn encode_idr_intra_recon(
     bw.put_flag(false); // no_output_of_prior_pics
     bw.put_flag(false); // long_term_reference
     bw.se(qp - 26); // slice_qp_delta → SliceQP = qp
-    // deblocking_filter_control_present is set in the PPS, so signal it here.
-    // disable_deblocking_filter_idc = 1 → decoder skips the in-loop deblocking
-    // filter, so its reconstruction matches our (non-deblocked) recon bit-exact.
+                    // deblocking_filter_control_present is set in the PPS, so signal it here.
+                    // disable_deblocking_filter_idc = 1 → decoder skips the in-loop deblocking
+                    // filter, so its reconstruction matches our (non-deblocked) recon bit-exact.
     bw.ue(1); // disable_deblocking_filter_idc = 1
 
     for mby in 0..mbh {
@@ -902,9 +1029,29 @@ pub(crate) fn encode_idr_intra_recon(
                 }
             }
             let cm = encode_chroma_mb(
-                &src_cb, &src_cr, &mut rec_cb, &mut rec_cr, cw, mbx, mby, qp, avail_l, avail_t,
+                &src_cb,
+                &src_cr,
+                &mut rec_cb,
+                &mut rec_cr,
+                cw,
+                mbx,
+                mby,
+                qp,
+                avail_l,
+                avail_t,
             );
-            emit_mb_i16(&mut bw, &i16, &cm, &mut nz_luma, lw4, &mut nz_cb, &mut nz_cr, cw4, mbx, mby);
+            emit_mb_i16(
+                &mut bw,
+                &i16,
+                &cm,
+                &mut nz_luma,
+                lw4,
+                &mut nz_cb,
+                &mut nz_cr,
+                cw4,
+                mbx,
+                mby,
+            );
         }
     }
     bw.trailing_bits();
@@ -967,7 +1114,10 @@ fn encode_chroma_mb(
         [(Vec::new(), [[0; 16]; 4]), (Vec::new(), [[0; 16]; 4])];
     let mut recon: [[u8; 64]; 2] = [[0u8; 64]; 2];
     let mut cbp_chroma_ac = false;
-    for (pi, (src, pred)) in [(&src_cb, &pred_cb), (&src_cr, &pred_cr)].into_iter().enumerate() {
+    for (pi, (src, pred)) in [(&src_cb, &pred_cb), (&src_cr, &pred_cr)]
+        .into_iter()
+        .enumerate()
+    {
         let mut dc_vals = [0i32; 4]; // raster order of the 4 sub-blocks' W[0]
         let mut wblk: [[i32; 16]; 4] = [[0; 16]; 4];
         for sb in 0..4 {
@@ -1037,7 +1187,8 @@ fn encode_chroma_mb(
             let p = pred[sb] as i32;
             for yy in 0..4 {
                 for xx in 0..4 {
-                    recon[pi][(by + yy) * 8 + (bx + xx)] = (p + sp[yy * 4 + xx]).clamp(0, 255) as u8;
+                    recon[pi][(by + yy) * 8 + (bx + xx)] =
+                        (p + sp[yy * 4 + xx]).clamp(0, 255) as u8;
                 }
             }
             ac_z[sb] = z;
@@ -1056,7 +1207,10 @@ fn encode_chroma_mb(
             }
         }
     }
-    ChromaMb { planes, cbp_chroma_ac }
+    ChromaMb {
+        planes,
+        cbp_chroma_ac,
+    }
 }
 
 /// One I_16x16 luma candidate: the 16×16 reconstruction (raster within the MB),
@@ -1064,9 +1218,9 @@ fn encode_chroma_mb(
 struct I16Luma {
     recon: [u8; 256],
     mode: u8,
-    dc_z: [i32; 16],          // Hadamard-DC levels (raster blk grid)
-    ac_z: [[i32; 16]; 16],    // per-block AC levels (raster within block)
-    cbp_luma_flag: u32,       // 1 if any AC coeff nonzero
+    dc_z: [i32; 16],       // Hadamard-DC levels (raster blk grid)
+    ac_z: [[i32; 16]; 16], // per-block AC levels (raster within block)
+    cbp_luma_flag: u32,    // 1 if any AC coeff nonzero
 }
 
 /// Compute the I_16x16 luma candidate for one MB: SAD-pick the prediction mode
@@ -1076,8 +1230,14 @@ struct I16Luma {
 /// reconstruction only if this candidate wins the per-MB free-energy decision.
 #[allow(clippy::needless_range_loop)]
 fn encode_luma_i16(
-    src_y: &[u8], rec_y: &[u8], pw: usize, mbx: usize, mby: usize, qp: i32,
-    avail_l: bool, avail_t: bool,
+    src_y: &[u8],
+    rec_y: &[u8],
+    pw: usize,
+    mbx: usize,
+    mby: usize,
+    qp: i32,
+    avail_l: bool,
+    avail_t: bool,
 ) -> I16Luma {
     let mut mode = 2u8;
     let mut pred16 = [0i32; 256];
@@ -1179,16 +1339,29 @@ fn encode_luma_i16(
             }
         }
     }
-    I16Luma { recon, mode, dc_z, ac_z, cbp_luma_flag: if cbp_luma_nonzero { 1 } else { 0 } }
+    I16Luma {
+        recon,
+        mode,
+        dc_z,
+        ac_z,
+        cbp_luma_flag: if cbp_luma_nonzero { 1 } else { 0 },
+    }
 }
 
 /// Emit one I_16x16 macroblock (header + residual) into `bw`, updating the nC
 /// TotalCoeff grids. Shared by the I_16x16-only path and the adaptive path.
 #[allow(clippy::too_many_arguments)]
 fn emit_mb_i16(
-    bw: &mut BitWriter, i16: &I16Luma, cm: &ChromaMb,
-    nz_luma: &mut [i32], lw4: usize, nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize,
-    mbx: usize, mby: usize,
+    bw: &mut BitWriter,
+    i16: &I16Luma,
+    cm: &ChromaMb,
+    nz_luma: &mut [i32],
+    lw4: usize,
+    nz_cb: &mut [i32],
+    nz_cr: &mut [i32],
+    cw4: usize,
+    mbx: usize,
+    mby: usize,
 ) {
     let cbp_chroma: u32 = if cm.cbp_chroma_ac { 2 } else { 1 };
     let mb_type = 1 + i16.mode as u32 + 4 * cbp_chroma + 12 * i16.cbp_luma_flag;
@@ -1218,9 +1391,18 @@ fn emit_mb_i16(
 /// residual) into `bw`, updating the nC grids and the frame-wide `mode_grid`.
 #[allow(clippy::too_many_arguments)]
 fn emit_mb_i4x4(
-    bw: &mut BitWriter, luma: &crate::h264_i4x4::I4x4Luma, cbp_luma: u32, cm: &ChromaMb,
-    nz_luma: &mut [i32], lw4: usize, mode_grid: &mut [i32],
-    nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize, mbx: usize, mby: usize,
+    bw: &mut BitWriter,
+    luma: &crate::h264_i4x4::I4x4Luma,
+    cbp_luma: u32,
+    cm: &ChromaMb,
+    nz_luma: &mut [i32],
+    lw4: usize,
+    mode_grid: &mut [i32],
+    nz_cb: &mut [i32],
+    nz_cr: &mut [i32],
+    cw4: usize,
+    mbx: usize,
+    mby: usize,
 ) {
     let cbp_chroma: u32 = if cm.cbp_chroma_ac { 2 } else { 1 };
     let cbp = cbp_luma | (cbp_chroma << 4);
@@ -1239,7 +1421,11 @@ fn emit_mb_i4x4(
             bw.put_flag(true);
         } else {
             bw.put_flag(false);
-            let rem = if actual < pred_mode { actual } else { actual - 1 };
+            let rem = if actual < pred_mode {
+                actual
+            } else {
+                actual - 1
+            };
             bw.put_bits(rem as u32, 3);
         }
         mode_grid[fy * lw4 + fx] = actual;
@@ -1272,8 +1458,14 @@ fn emit_mb_i4x4(
 /// types. Updates the chroma nC grids.
 #[allow(clippy::too_many_arguments)]
 fn emit_chroma_residual(
-    cav: &mut Cavlc, cm: &ChromaMb, cbp_chroma: u32,
-    nz_cb: &mut [i32], nz_cr: &mut [i32], cw4: usize, mbx: usize, mby: usize,
+    cav: &mut Cavlc,
+    cm: &ChromaMb,
+    cbp_chroma: u32,
+    nz_cb: &mut [i32],
+    nz_cr: &mut [i32],
+    cw4: usize,
+    mbx: usize,
+    mby: usize,
 ) {
     for pi in 0..2 {
         cav.block(&cm.planes[pi].0, -1);
@@ -1283,8 +1475,11 @@ fn emit_chroma_residual(
             let grid: &mut [i32] = if pi == 0 { nz_cb } else { nz_cr };
             for sb in 0..4 {
                 let nc = chroma_ac_nc(grid, cw4, mbx, mby, sb);
-                let ac_scan: Vec<i32> =
-                    ZZ4.iter().skip(1).map(|&i| cm.planes[pi].1[sb][i]).collect();
+                let ac_scan: Vec<i32> = ZZ4
+                    .iter()
+                    .skip(1)
+                    .map(|&i| cm.planes[pi].1[sb][i])
+                    .collect();
                 let tc = cav.block(&ac_scan, nc);
                 set_chroma_ac_nz(grid, cw4, mbx, mby, sb, tc as i32);
             }
@@ -1309,7 +1504,15 @@ fn snap_rect(grid: &[i32], w: usize, x0: usize, y0: usize, bw: usize, bh: usize)
     }
     out
 }
-fn restore_rect(grid: &mut [i32], w: usize, x0: usize, y0: usize, bw: usize, bh: usize, saved: &[i32]) {
+fn restore_rect(
+    grid: &mut [i32],
+    w: usize,
+    x0: usize,
+    y0: usize,
+    bw: usize,
+    bh: usize,
+    saved: &[i32],
+) {
     let mut k = 0;
     for gy in y0..y0 + bh {
         for gx in x0..x0 + bw {
@@ -1328,7 +1531,15 @@ fn rdo_lambda(qp: i32) -> f64 {
 // ── I_16x16 luma prediction (H.264 8.3.3): modes 0=V 1=H 2=DC 3=Plane ──
 // Produces a full 16×16 prediction from reconstructed left/top neighbours.
 // Returns None if the chosen mode's required neighbours are unavailable.
-fn intra16_pred(rec: &[u8], pw: usize, mbx: usize, mby: usize, mode: u8, al: bool, at: bool) -> Option<[i32; 256]> {
+fn intra16_pred(
+    rec: &[u8],
+    pw: usize,
+    mbx: usize,
+    mby: usize,
+    mode: u8,
+    al: bool,
+    at: bool,
+) -> Option<[i32; 256]> {
     let x0 = mbx * 16;
     let y0 = mby * 16;
     let top = |i: usize| rec[(y0 - 1) * pw + (x0 + i)] as i32;
@@ -1489,8 +1700,16 @@ fn c_shift(x: i64, s: i32) -> i64 {
 fn chroma_ac_nc(grid: &[i32], cw4: usize, mbx: usize, mby: usize, sb: usize) -> i32 {
     let gx = mbx * 2 + (sb % 2);
     let gy = mby * 2 + (sb / 2);
-    let left = if gx > 0 { grid[gy * cw4 + (gx - 1)] } else { -1 };
-    let top = if gy > 0 { grid[(gy - 1) * cw4 + gx] } else { -1 };
+    let left = if gx > 0 {
+        grid[gy * cw4 + (gx - 1)]
+    } else {
+        -1
+    };
+    let top = if gy > 0 {
+        grid[(gy - 1) * cw4 + gx]
+    } else {
+        -1
+    };
     match (left >= 0, top >= 0) {
         (true, true) => (left + top + 1) >> 1,
         (true, false) => left,
@@ -1544,9 +1763,7 @@ mod roundtrip_tests {
         let qbits = 15 + qp / 6;
         let f = (1i64 << qbits) / 3;
         // a non-trivial residual (values a real intra residual might have)
-        let resid: [i32; 16] = [
-            12, -5, 3, 1, -8, 7, -2, 0, 4, -3, 6, -1, 2, 0, -4, 5,
-        ];
+        let resid: [i32; 16] = [12, -5, 3, 1, -8, 7, -2, 0, 4, -3, 6, -1, 2, 0, -4, 5];
         let w = fwd_core(&resid);
         // forward quant (all positions, class-dependent)
         let mut z = [0i32; 16];
@@ -1576,7 +1793,10 @@ mod roundtrip_tests {
         eprintln!("residual: {:?}", resid);
         eprintln!("recon:    {:?}", back);
         eprintln!("max abs error at QP{qp}: {maxerr}");
-        assert!(maxerr <= 3, "core transform round-trip error {maxerr} too large (QP{qp})");
+        assert!(
+            maxerr <= 3,
+            "core transform round-trip error {maxerr} too large (QP{qp})"
+        );
     }
 }
 
@@ -1625,75 +1845,185 @@ mod dc_roundtrip {
         eprintln!("dc_vals:  {:?}", dc_vals);
         eprintln!("dc_recon: {:?}", dc_recon);
         eprintln!("DC max abs error at QP{qp}: {maxerr}  (should be ~quant step, not ~values)");
-        assert!(maxerr < 100, "DC Hadamard round-trip error {maxerr} — scaling bug");
+        assert!(
+            maxerr < 100,
+            "DC Hadamard round-trip error {maxerr} — scaling bug"
+        );
     }
 }
 
 #[cfg(test)]
 mod cavlc_fuzz {
     use super::*;
-    struct Br<'a> { d: &'a [u8], pos: usize }
-    impl<'a> Br<'a> {
-        fn bit(&mut self) -> u32 { let b=(self.d[self.pos/8]>>(7-(self.pos%8)))&1; self.pos+=1; b as u32 }
-        fn bits(&mut self, n: u32) -> u32 { let mut v=0; for _ in 0..n { v=(v<<1)|self.bit(); } v }
+    struct Br<'a> {
+        d: &'a [u8],
+        pos: usize,
     }
-    fn vlc(br:&mut Br, t:&[(u8,u16)])->usize{
-        let mut code=0u32; let mut len=0u8;
-        for _ in 0..16 { code=(code<<1)|br.bit(); len+=1;
-            for (s,&(l,c)) in t.iter().enumerate(){ if l!=0 && l==len && c as u32==code {return s;} } }
+    impl<'a> Br<'a> {
+        fn bit(&mut self) -> u32 {
+            let b = (self.d[self.pos / 8] >> (7 - (self.pos % 8))) & 1;
+            self.pos += 1;
+            b as u32
+        }
+        fn bits(&mut self, n: u32) -> u32 {
+            let mut v = 0;
+            for _ in 0..n {
+                v = (v << 1) | self.bit();
+            }
+            v
+        }
+    }
+    fn vlc(br: &mut Br, t: &[(u8, u16)]) -> usize {
+        let mut code = 0u32;
+        let mut len = 0u8;
+        for _ in 0..16 {
+            code = (code << 1) | br.bit();
+            len += 1;
+            for (s, &(l, c)) in t.iter().enumerate() {
+                if l != 0 && l == len && c as u32 == code {
+                    return s;
+                }
+            }
+        }
         panic!("vlc decode fail");
     }
-    fn dec(bytes:&[u8], nc:i32, max:usize)->Vec<i32>{
-        let mut br=Br{d:bytes,pos:0};
-        let (mut tc, mut t1)=(0usize,0usize);
-        { let mut code=0u32; let mut len=0u8; 'o: for _ in 0..16 { code=(code<<1)|br.bit(); len+=1;
-            for c in 0..=16usize { for o in 0..=c.min(3) {
-                if nc<0 && c>4 {continue}
-                let (l,cc)=coeff_token(c,o,nc);
-                if l==len as u32 && cc==code { tc=c; t1=o; break 'o; } } } } }
-        if tc==0 { return vec![0;max]; }
-        let mut lv=vec![0i32;tc];
-        for j in 0..t1 { lv[j]= if br.bit()==1 {-1}else{1}; }
-        let mut sl:u32= if tc>10 && t1<3 {1}else{0};
-        for j in t1..tc {
-            let mut lp=0u32; while br.bit()==0 {lp+=1;}
-            let mut code;
-            if sl==0 { if lp<14 {code=lp as i32;} else if lp==14 {code=14+br.bits(4)as i32;} else {code=30+br.bits(12)as i32;} }
-            else { code=((lp<<sl)|br.bits(sl)) as i32; }
-            if j==t1 && t1<3 { code+=2; }
-            lv[j]= if code%2==0 {(code+2)>>1} else {-((code+1)>>1)};
-            if sl==0 {sl=1;}
-            if lv[j].unsigned_abs() > (3u32<<(sl-1)) && sl<6 { sl+=1; }
+    fn dec(bytes: &[u8], nc: i32, max: usize) -> Vec<i32> {
+        let mut br = Br { d: bytes, pos: 0 };
+        let (mut tc, mut t1) = (0usize, 0usize);
+        {
+            let mut code = 0u32;
+            let mut len = 0u8;
+            'o: for _ in 0..16 {
+                code = (code << 1) | br.bit();
+                len += 1;
+                for c in 0..=16usize {
+                    for o in 0..=c.min(3) {
+                        if nc < 0 && c > 4 {
+                            continue;
+                        }
+                        let (l, cc) = coeff_token(c, o, nc);
+                        if l == len as u32 && cc == code {
+                            tc = c;
+                            t1 = o;
+                            break 'o;
+                        }
+                    }
+                }
+            }
         }
-        let tz= if tc<max {
-            let tbl:Vec<(u8,u16)>=(0..=(max-tc)).map(|z|{let (l,c)= if max==4 {total_zeros_chroma_dc(tc,z as i32)} else {total_zeros_4x4(tc,z as i32)}; (l as u8,c as u16)}).collect();
-            vlc(&mut br,&tbl) as i32 } else {0};
-        let mut zl=tz; let mut runs=vec![0i32;tc];
-        for j in 0..tc-1 { if zl<=0 {break;}
-            let tbl:Vec<(u8,u16)>=(0..=zl).map(|r|{let (l,c)=run_before(r,zl); (l as u8,c as u16)}).collect();
-            runs[j]=vlc(&mut br,&tbl) as i32; zl-=runs[j]; }
-        runs[tc-1]=zl;
-        let mut pos=vec![0i32;tc]; let mut acc=0i32;
-        for i in (0..tc).rev(){ acc+=runs[i]+1; pos[i]=acc-1; }
-        let mut out=vec![0i32;max];
-        for i in 0..tc { out[pos[i] as usize]=lv[i]; }
+        if tc == 0 {
+            return vec![0; max];
+        }
+        let mut lv = vec![0i32; tc];
+        for j in 0..t1 {
+            lv[j] = if br.bit() == 1 { -1 } else { 1 };
+        }
+        let mut sl: u32 = if tc > 10 && t1 < 3 { 1 } else { 0 };
+        for j in t1..tc {
+            let mut lp = 0u32;
+            while br.bit() == 0 {
+                lp += 1;
+            }
+            let mut code;
+            if sl == 0 {
+                if lp < 14 {
+                    code = lp as i32;
+                } else if lp == 14 {
+                    code = 14 + br.bits(4) as i32;
+                } else {
+                    code = 30 + br.bits(12) as i32;
+                }
+            } else {
+                code = ((lp << sl) | br.bits(sl)) as i32;
+            }
+            if j == t1 && t1 < 3 {
+                code += 2;
+            }
+            lv[j] = if code % 2 == 0 {
+                (code + 2) >> 1
+            } else {
+                -((code + 1) >> 1)
+            };
+            if sl == 0 {
+                sl = 1;
+            }
+            if lv[j].unsigned_abs() > (3u32 << (sl - 1)) && sl < 6 {
+                sl += 1;
+            }
+        }
+        let tz = if tc < max {
+            let tbl: Vec<(u8, u16)> = (0..=(max - tc))
+                .map(|z| {
+                    let (l, c) = if max == 4 {
+                        total_zeros_chroma_dc(tc, z as i32)
+                    } else {
+                        total_zeros_4x4(tc, z as i32)
+                    };
+                    (l as u8, c as u16)
+                })
+                .collect();
+            vlc(&mut br, &tbl) as i32
+        } else {
+            0
+        };
+        let mut zl = tz;
+        let mut runs = vec![0i32; tc];
+        for j in 0..tc - 1 {
+            if zl <= 0 {
+                break;
+            }
+            let tbl: Vec<(u8, u16)> = (0..=zl)
+                .map(|r| {
+                    let (l, c) = run_before(r, zl);
+                    (l as u8, c as u16)
+                })
+                .collect();
+            runs[j] = vlc(&mut br, &tbl) as i32;
+            zl -= runs[j];
+        }
+        runs[tc - 1] = zl;
+        let mut pos = vec![0i32; tc];
+        let mut acc = 0i32;
+        for i in (0..tc).rev() {
+            acc += runs[i] + 1;
+            pos[i] = acc - 1;
+        }
+        let mut out = vec![0i32; max];
+        for i in 0..tc {
+            out[pos[i] as usize] = lv[i];
+        }
         out
     }
     #[test]
     fn block_roundtrips() {
-        let mut st=0xBADC0FFEu64;
-        let mut rng=|| { st=st.wrapping_mul(6364136223846793005).wrapping_add(1); (st>>33) as u32 };
+        let mut st = 0xBADC0FFEu64;
+        let mut rng = || {
+            st = st.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (st >> 33) as u32
+        };
         for trial in 0..200000u32 {
-            let max= match trial%3 {0=>4,1=>15,_=>16};
-            let nc= (rng()%9) as i32;
-            let mut coeffs=vec![0i32;max];
-            let k=(rng() as usize)%(max+1);
-            for _ in 0..k { let p=(rng() as usize)%max; let m=1+(rng()%15) as i32; coeffs[p]= if rng()&1==1 {m}else{-m}; }
-            let mut bw=BitWriter::new();
-            { let mut c=Cavlc{bw:&mut bw}; c.block(&coeffs,nc); }
-            bw.put_bit(1); bw.align_zero();
-            let got=dec(&bw.into_rbsp(),nc,max);
-            assert_eq!(got,coeffs,"trial {trial} nc={nc} max={max}");
+            let max = match trial % 3 {
+                0 => 4,
+                1 => 15,
+                _ => 16,
+            };
+            let nc = (rng() % 9) as i32;
+            let mut coeffs = vec![0i32; max];
+            let k = (rng() as usize) % (max + 1);
+            for _ in 0..k {
+                let p = (rng() as usize) % max;
+                let m = 1 + (rng() % 15) as i32;
+                coeffs[p] = if rng() & 1 == 1 { m } else { -m };
+            }
+            let mut bw = BitWriter::new();
+            {
+                let mut c = Cavlc { bw: &mut bw };
+                c.block(&coeffs, nc);
+            }
+            bw.put_bit(1);
+            bw.align_zero();
+            let got = dec(&bw.into_rbsp(), nc, max);
+            assert_eq!(got, coeffs, "trial {trial} nc={nc} max={max}");
         }
     }
 }
@@ -1701,26 +2031,43 @@ mod cavlc_fuzz {
 #[cfg(test)]
 mod chroma_dc_unit {
     use super::*;
-    fn shift(x: i64, s: i32) -> i64 { if s <= 0 { x << (-s) } else { (x + (1 << (s - 1))) >> s } }
-    fn chroma_dc_qdq(dc: [i32;4], qpc: i32) -> [i32;4] {
-        let rem=(qpc%6) as usize;
-        let q4mf=shift(MF[rem][0] as i64, qpc/6 - 1);
-        let mf=q4mf>>1; let bias=((1i64<<15)/q4mf)<<1;
-        let had=hadamard2(&dc);
-        let mut z=[0i32;4];
-        for i in 0..4 { let d=had[i] as i64; let q=((bias+d.abs())*mf)>>16; z[i]= if d<0 {-(q as i32)} else {q as i32}; }
-        let deq=hadamard2(&z);
-        let dmf=(V[rem][0] as i64)<<(qpc/6);
-        let mut r=[0i32;4]; for i in 0..4 { r[i]=((deq[i] as i64*dmf)>>5) as i32; }
+    fn shift(x: i64, s: i32) -> i64 {
+        if s <= 0 {
+            x << (-s)
+        } else {
+            (x + (1 << (s - 1))) >> s
+        }
+    }
+    fn chroma_dc_qdq(dc: [i32; 4], qpc: i32) -> [i32; 4] {
+        let rem = (qpc % 6) as usize;
+        let q4mf = shift(MF[rem][0] as i64, qpc / 6 - 1);
+        let mf = q4mf >> 1;
+        let bias = ((1i64 << 15) / q4mf) << 1;
+        let had = hadamard2(&dc);
+        let mut z = [0i32; 4];
+        for i in 0..4 {
+            let d = had[i] as i64;
+            let q = ((bias + d.abs()) * mf) >> 16;
+            z[i] = if d < 0 { -(q as i32) } else { q as i32 };
+        }
+        let deq = hadamard2(&z);
+        let dmf = (V[rem][0] as i64) << (qpc / 6);
+        let mut r = [0i32; 4];
+        for i in 0..4 {
+            r[i] = ((deq[i] as i64 * dmf) >> 5) as i32;
+        }
         r
     }
     #[test]
     fn matches_x264_golden() {
         // hand-traced verbatim from x264 encoder/macroblock.c at qpc=6
-        assert_eq!(chroma_dc_qdq([120,-80,40,-16], 6), [28,-20,10,-4]);
+        assert_eq!(chroma_dc_qdq([120, -80, 40, -16], 6), [28, -20, 10, -4]);
         // flat DC in → uniform DC out (inverse Hadamard of a single DC coeff)
-        let r = chroma_dc_qdq([100,100,100,100], 6);
-        assert!(r.iter().all(|&v| (v - r[0]).abs() <= 1), "flat in → flat out, got {r:?}");
+        let r = chroma_dc_qdq([100, 100, 100, 100], 6);
+        assert!(
+            r.iter().all(|&v| (v - r[0]).abs() <= 1),
+            "flat in → flat out, got {r:?}"
+        );
         assert!(r[0] > 0);
     }
 }

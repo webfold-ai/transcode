@@ -38,7 +38,16 @@ fn rd_u32le(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 fn rd_i64le(b: &[u8], o: usize) -> i64 {
-    i64::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3], b[o + 4], b[o + 5], b[o + 6], b[o + 7]])
+    i64::from_le_bytes([
+        b[o],
+        b[o + 1],
+        b[o + 2],
+        b[o + 3],
+        b[o + 4],
+        b[o + 5],
+        b[o + 6],
+        b[o + 7],
+    ])
 }
 
 /// Demux an Ogg stream into Opus packets (segment reassembly across pages).
@@ -67,7 +76,10 @@ pub fn demux_ogg(data: &[u8]) -> Result<Vec<OggPacket>, String> {
             body += l;
             if lace < 255 {
                 // a lacing value < 255 terminates a packet
-                packets.push(OggPacket { data: std::mem::take(&mut cur), granule });
+                packets.push(OggPacket {
+                    data: std::mem::take(&mut cur),
+                    granule,
+                });
             }
         }
         o = body;
@@ -234,7 +246,11 @@ impl<'a> RangeDecoder<'a> {
     pub fn update(&mut self, fl: u32, fh: u32, ft: u32) {
         let s = self.ext * (ft - fh);
         self.val -= s;
-        self.rng = if fl > 0 { self.ext * (fh - fl) } else { self.rng - s };
+        self.rng = if fl > 0 {
+            self.ext * (fh - fl)
+        } else {
+            self.rng - s
+        };
         self.normalize();
     }
     pub fn dec_bit_logp(&mut self, logp: u32) -> u32 {
@@ -573,7 +589,12 @@ pub fn range_selftest() -> i32 {
         }
         idx += 1;
     }
-    println!("opus range coder: {} symbols round-trip in {} bytes [{}]", prog.len(), bytes.len(), if ok { "ok" } else { "FAIL" });
+    println!(
+        "opus range coder: {} symbols round-trip in {} bytes [{}]",
+        prog.len(),
+        bytes.len(),
+        if ok { "ok" } else { "FAIL" }
+    );
     if ok {
         0
     } else {
@@ -594,7 +615,7 @@ pub enum Mode {
 #[derive(Debug, Clone, Copy)]
 pub struct Toc {
     pub mode: Mode,
-    pub bandwidth_hz: u32, // 4000/6000/8000/12000/20000
+    pub bandwidth_hz: u32,       // 4000/6000/8000/12000/20000
     pub frame_size_samples: u32, // @48kHz
     pub stereo: bool,
     pub frame_count: u8,
@@ -605,14 +626,38 @@ fn config_table(config: u8) -> (Mode, u32, u32) {
     // frame size in samples @48k: 2.5ms=120, 5=240, 10=480, 20=960, 40=1920, 60=2880
     let (m, bw, fs) = match config {
         0..=3 => (Mode::Silk, 4000, [480, 960, 1920, 2880][config as usize]),
-        4..=7 => (Mode::Silk, 6000, [480, 960, 1920, 2880][(config - 4) as usize]),
-        8..=11 => (Mode::Silk, 8000, [480, 960, 1920, 2880][(config - 8) as usize]),
+        4..=7 => (
+            Mode::Silk,
+            6000,
+            [480, 960, 1920, 2880][(config - 4) as usize],
+        ),
+        8..=11 => (
+            Mode::Silk,
+            8000,
+            [480, 960, 1920, 2880][(config - 8) as usize],
+        ),
         12..=13 => (Mode::Hybrid, 12000, [480, 960][(config - 12) as usize]),
         14..=15 => (Mode::Hybrid, 20000, [480, 960][(config - 14) as usize]),
-        16..=19 => (Mode::Celt, 4000, [120, 240, 480, 960][(config - 16) as usize]),
-        20..=23 => (Mode::Celt, 8000, [120, 240, 480, 960][(config - 20) as usize]),
-        24..=27 => (Mode::Celt, 12000, [120, 240, 480, 960][(config - 24) as usize]),
-        _ => (Mode::Celt, 20000, [120, 240, 480, 960][(config - 28) as usize]),
+        16..=19 => (
+            Mode::Celt,
+            4000,
+            [120, 240, 480, 960][(config - 16) as usize],
+        ),
+        20..=23 => (
+            Mode::Celt,
+            8000,
+            [120, 240, 480, 960][(config - 20) as usize],
+        ),
+        24..=27 => (
+            Mode::Celt,
+            12000,
+            [120, 240, 480, 960][(config - 24) as usize],
+        ),
+        _ => (
+            Mode::Celt,
+            20000,
+            [120, 240, 480, 960][(config - 28) as usize],
+        ),
     };
     (m, bw, fs)
 }
@@ -622,7 +667,13 @@ pub fn parse_toc(toc: u8) -> Toc {
     let stereo = (toc >> 2) & 1 == 1;
     let frame_count = toc & 3;
     let (mode, bandwidth_hz, frame_size_samples) = config_table(config);
-    Toc { mode, bandwidth_hz, frame_size_samples, stereo, frame_count }
+    Toc {
+        mode,
+        bandwidth_hz,
+        frame_size_samples,
+        stereo,
+        frame_count,
+    }
 }
 
 /// Summarize the per-packet TOC distribution across the stream.
@@ -772,7 +823,11 @@ pub fn laplace_selftest() -> i32 {
             break;
         }
     }
-    println!("opus laplace coder: {} energy symbols round-trip [{}]", params.len(), if ok { "ok" } else { "FAIL" });
+    println!(
+        "opus laplace coder: {} energy symbols round-trip [{}]",
+        params.len(),
+        if ok { "ok" } else { "FAIL" }
+    );
     if ok {
         0
     } else {
@@ -790,12 +845,27 @@ use crate::opus_tables;
 
 /// unquant_coarse_energy: decode band energies into `old_e` (log2-energy units).
 pub fn unquant_coarse_energy(
-    d: &mut RangeDecoder, start: usize, end: usize, old_e: &mut [f64],
-    intra: bool, c_ch: usize, lm: usize, nb: usize, budget: i32,
+    d: &mut RangeDecoder,
+    start: usize,
+    end: usize,
+    old_e: &mut [f64],
+    intra: bool,
+    c_ch: usize,
+    lm: usize,
+    nb: usize,
+    budget: i32,
 ) {
     let pm = &opus_tables::E_PROB_MODEL[lm][if intra { 1 } else { 0 }];
-    let coef = if intra { 0.0 } else { opus_tables::PRED_COEF[lm] };
-    let beta = if intra { opus_tables::BETA_INTRA } else { opus_tables::BETA_COEF[lm] };
+    let coef = if intra {
+        0.0
+    } else {
+        opus_tables::PRED_COEF[lm]
+    };
+    let beta = if intra {
+        opus_tables::BETA_INTRA
+    } else {
+        opus_tables::BETA_COEF[lm]
+    };
     let mut prev = [0.0f64; 2];
     for i in start..end {
         for c in 0..c_ch {
@@ -824,12 +894,28 @@ pub fn unquant_coarse_energy(
 /// identically to the decoder. (Round-trip path; omits the decay/lfe quality
 /// heuristics, which only nudge qi — the decoder recovers whatever qi was coded.)
 pub fn quant_coarse_energy(
-    enc: &mut RangeEncoder, start: usize, end: usize, e: &[f64], old_e: &mut [f64],
-    intra: bool, c_ch: usize, lm: usize, nb: usize, budget: i32,
+    enc: &mut RangeEncoder,
+    start: usize,
+    end: usize,
+    e: &[f64],
+    old_e: &mut [f64],
+    intra: bool,
+    c_ch: usize,
+    lm: usize,
+    nb: usize,
+    budget: i32,
 ) {
     let pm = &opus_tables::E_PROB_MODEL[lm][if intra { 1 } else { 0 }];
-    let coef = if intra { 0.0 } else { opus_tables::PRED_COEF[lm] };
-    let beta = if intra { opus_tables::BETA_INTRA } else { opus_tables::BETA_COEF[lm] };
+    let coef = if intra {
+        0.0
+    } else {
+        opus_tables::PRED_COEF[lm]
+    };
+    let beta = if intra {
+        opus_tables::BETA_INTRA
+    } else {
+        opus_tables::BETA_COEF[lm]
+    };
     let mut prev = [0.0f64; 2];
     for i in start..end {
         for c in 0..c_ch {
@@ -883,13 +969,34 @@ pub fn coarse_energy_selftest() -> i32 {
                 let mut enc = RangeEncoder::with_capacity(1 << 14);
                 let budget = (enc.buf_len() * 8) as i32;
                 enc.enc_bit_logp(intra as u32, 3); // intra flag (as in celt)
-                quant_coarse_energy(&mut enc, 0, nb, &e, &mut oe_enc, intra, c_ch, lm, nb, budget);
+                quant_coarse_energy(
+                    &mut enc,
+                    0,
+                    nb,
+                    &e,
+                    &mut oe_enc,
+                    intra,
+                    c_ch,
+                    lm,
+                    nb,
+                    budget,
+                );
                 let bytes = enc.done();
                 let mut oe_dec = vec![0.0f64; nb * c_ch];
                 let mut dec = RangeDecoder::new(&bytes);
                 let dbudget = (bytes.len() * 8) as i32;
                 let intra_dec = dec.dec_bit_logp(3) == 1;
-                unquant_coarse_energy(&mut dec, 0, nb, &mut oe_dec, intra_dec, c_ch, lm, nb, dbudget);
+                unquant_coarse_energy(
+                    &mut dec,
+                    0,
+                    nb,
+                    &mut oe_dec,
+                    intra_dec,
+                    c_ch,
+                    lm,
+                    nb,
+                    dbudget,
+                );
                 cases += 1;
                 if intra_dec != intra || oe_enc != oe_dec {
                     fails += 1;
@@ -898,7 +1005,10 @@ pub fn coarse_energy_selftest() -> i32 {
             }
         }
     }
-    println!("opus coarse energy: {cases} cases (LM×intra×C) round-trip [{}]", if fails == 0 { "ok" } else { "FAIL" });
+    println!(
+        "opus coarse energy: {cases} cases (LM×intra×C) round-trip [{}]",
+        if fails == 0 { "ok" } else { "FAIL" }
+    );
     if fails == 0 {
         0
     } else {
@@ -1038,8 +1148,21 @@ pub fn pvq_selftest() -> i32 {
     };
     // (N,K) pairs spanning small/large dims & pulse counts (min(N,K) ≤ 14, as CELT guarantees)
     let cases = [
-        (2usize, 1usize), (2, 5), (3, 1), (3, 8), (4, 2), (4, 10), (8, 1), (8, 6),
-        (16, 3), (16, 8), (12, 12), (44, 2), (88, 3), (176, 1), (176, 4),
+        (2usize, 1usize),
+        (2, 5),
+        (3, 1),
+        (3, 8),
+        (4, 2),
+        (4, 10),
+        (8, 1),
+        (8, 6),
+        (16, 3),
+        (16, 8),
+        (12, 12),
+        (44, 2),
+        (88, 3),
+        (176, 1),
+        (176, 4),
     ];
     let mut fails = 0;
     let mut total = 0;
@@ -1052,7 +1175,11 @@ pub fn pvq_selftest() -> i32 {
                 counts[(rnd() as usize) % n] += 1;
             }
             for i in 0..n {
-                y[i] = if rnd() & 1 == 1 { -counts[i] } else { counts[i] };
+                y[i] = if rnd() & 1 == 1 {
+                    -counts[i]
+                } else {
+                    counts[i]
+                };
             }
             let mut enc = RangeEncoder::with_capacity(256);
             encode_pulses(&y, n, k, &mut enc);
@@ -1068,7 +1195,11 @@ pub fn pvq_selftest() -> i32 {
             }
         }
     }
-    println!("opus PVQ (cwrs): {total} pulse vectors round-trip across {} (N,K) configs [{}]", cases.len(), if fails == 0 { "ok" } else { "FAIL" });
+    println!(
+        "opus PVQ (cwrs): {total} pulse vectors round-trip across {} (N,K) configs [{}]",
+        cases.len(),
+        if fails == 0 { "ok" } else { "FAIL" }
+    );
     if fails == 0 {
         0
     } else {
@@ -1082,8 +1213,13 @@ pub fn pvq_selftest() -> i32 {
 
 /// unquant_fine_energy: add the fine-quant offset to each band's energy.
 pub fn unquant_fine_energy(
-    dec: &mut RangeDecoder, start: usize, end: usize, old_e: &mut [f64],
-    fine: &[i32], c_ch: usize, nb: usize,
+    dec: &mut RangeDecoder,
+    start: usize,
+    end: usize,
+    old_e: &mut [f64],
+    fine: &[i32],
+    c_ch: usize,
+    nb: usize,
 ) {
     for i in start..end {
         if fine[i] <= 0 {
@@ -1099,8 +1235,14 @@ pub fn unquant_fine_energy(
 
 /// quant_fine_energy: encode the residual error to `fine[i]` bits per band.
 pub fn quant_fine_energy(
-    enc: &mut RangeEncoder, start: usize, end: usize, old_e: &mut [f64], err: &[f64],
-    fine: &[i32], c_ch: usize, nb: usize,
+    enc: &mut RangeEncoder,
+    start: usize,
+    end: usize,
+    old_e: &mut [f64],
+    err: &[f64],
+    fine: &[i32],
+    c_ch: usize,
+    nb: usize,
 ) {
     for i in start..end {
         if fine[i] <= 0 {
@@ -1133,8 +1275,12 @@ pub fn fine_energy_selftest() -> i32 {
         for f in fine.iter_mut() {
             *f = (rnd() % 9) as i32; // 0..8 bits
         }
-        let base: Vec<f64> = (0..nb * c_ch).map(|_| (rnd() % 1000) as f64 / 10.0).collect();
-        let err: Vec<f64> = (0..nb * c_ch).map(|_| (rnd() % 1000) as f64 / 1000.0 - 0.5).collect();
+        let base: Vec<f64> = (0..nb * c_ch)
+            .map(|_| (rnd() % 1000) as f64 / 10.0)
+            .collect();
+        let err: Vec<f64> = (0..nb * c_ch)
+            .map(|_| (rnd() % 1000) as f64 / 1000.0 - 0.5)
+            .collect();
         let mut oe_enc = base.clone();
         let mut enc = RangeEncoder::with_capacity(1 << 12);
         quant_fine_energy(&mut enc, 0, nb, &mut oe_enc, &err, &fine, c_ch, nb);
@@ -1146,7 +1292,10 @@ pub fn fine_energy_selftest() -> i32 {
             fails += 1;
         }
     }
-    println!("opus fine energy: mono+stereo round-trip [{}]", if fails == 0 { "ok" } else { "FAIL" });
+    println!(
+        "opus fine energy: mono+stereo round-trip [{}]",
+        if fails == 0 { "ok" } else { "FAIL" }
+    );
     if fails == 0 {
         0
     } else {
@@ -1164,7 +1313,11 @@ const LOG_MAX_PSEUDO: usize = 6;
 const NB_EBANDS: usize = 21;
 
 fn get_pulses(i: i32) -> i32 {
-    if i < 8 { i } else { (8 + (i & 7)) << ((i >> 3) - 1) }
+    if i < 8 {
+        i
+    } else {
+        (8 + (i & 7)) << ((i >> 3) - 1)
+    }
 }
 
 /// Largest pulse count whose cached cost ≤ `bits` (8th-bit units), per band/LM.
@@ -1184,7 +1337,12 @@ pub fn bits2pulses(band: usize, lm: i32, bits: i32) -> i32 {
             lo = mid;
         }
     }
-    if b - (if lo == 0 { -1 } else { cache[lo as usize] as i32 }) <= cache[hi as usize] as i32 - b {
+    if b - (if lo == 0 {
+        -1
+    } else {
+        cache[lo as usize] as i32
+    }) <= cache[hi as usize] as i32 - b
+    {
         lo
     } else {
         hi
@@ -1206,7 +1364,11 @@ pub fn alloc_cache_selftest() -> i32 {
     let mut fails = 0;
     let mut total = 0;
     // also sanity-check get_pulses monotonic + known values
-    let gp_ok = get_pulses(0) == 0 && get_pulses(7) == 7 && get_pulses(8) == 8 && get_pulses(9) == 9 && get_pulses(16) == 16;
+    let gp_ok = get_pulses(0) == 0
+        && get_pulses(7) == 7
+        && get_pulses(8) == 8
+        && get_pulses(9) == 9
+        && get_pulses(16) == 16;
     for lm in 0..4 {
         for band in 0..NB_EBANDS {
             let off = opus_tables::CACHE_INDEX50[(lm + 1) as usize * NB_EBANDS + band];
@@ -1256,8 +1418,9 @@ const MAX_FINE_BITS: i32 = 8;
 const SPREAD_ICDF: [u8; 4] = [25, 23, 2, 0];
 const TAPSET_ICDF: [u8; 3] = [2, 1, 0];
 const TRIM_ICDF: [u8; 11] = [126, 124, 119, 109, 87, 41, 19, 9, 4, 2, 0];
-const LOG2_FRAC_TABLE: [u8; 24] =
-    [0, 8, 13, 16, 19, 21, 23, 24, 26, 27, 28, 29, 30, 31, 32, 32, 33, 34, 34, 35, 36, 36, 37, 37];
+const LOG2_FRAC_TABLE: [u8; 24] = [
+    0, 8, 13, 16, 19, 21, 23, 24, 26, 27, 28, 29, 30, 31, 32, 32, 33, 34, 34, 35, 36, 36, 37, 37,
+];
 const TF_SELECT_TABLE: [[i8; 8]; 4] = [
     [0, -1, 0, -1, 0, -1, 0, -1],
     [0, -1, 0, -2, 1, 0, 1, -1],
@@ -1273,11 +1436,23 @@ fn eb(i: usize) -> i32 {
 fn init_caps(cap: &mut [i32], lm: i32, c_ch: i32, nb: usize) {
     for i in 0..nb {
         let n = (eb(i + 1) - eb(i)) << lm;
-        cap[i] = (opus_tables::CACHE_CAPS50[(nb as i32 * (2 * lm + c_ch - 1) + i as i32) as usize] as i32 + 64) * c_ch * n >> 2;
+        cap[i] = (opus_tables::CACHE_CAPS50[(nb as i32 * (2 * lm + c_ch - 1) + i as i32) as usize]
+            as i32
+            + 64)
+            * c_ch
+            * n
+            >> 2;
     }
 }
 
-fn tf_decode(start: usize, end: usize, is_transient: bool, tf_res: &mut [i32], lm: i32, dec: &mut RangeDecoder) {
+fn tf_decode(
+    start: usize,
+    end: usize,
+    is_transient: bool,
+    tf_res: &mut [i32],
+    lm: i32,
+    dec: &mut RangeDecoder,
+) {
     let mut budget = (dec.storage * 8) as i32;
     let mut tell = dec.tell();
     let mut logp = if is_transient { 2 } else { 4 };
@@ -1309,10 +1484,26 @@ fn tf_decode(start: usize, end: usize, is_transient: bool, tf_res: &mut [i32], l
 
 #[allow(clippy::too_many_arguments)]
 fn interp_bits2pulses(
-    start: usize, end: usize, skip_start: usize, bits1: &[i32], bits2: &[i32], thresh: &[i32], cap: &[i32],
-    mut total: i32, balance: &mut i32, skip_rsv: i32, intensity: &mut i32, mut intensity_rsv: i32,
-    dual_stereo: &mut i32, mut dual_stereo_rsv: i32, pulses: &mut [i32], ebits: &mut [i32],
-    fine_priority: &mut [i32], c_ch: i32, lm: i32, dec: &mut RangeDecoder,
+    start: usize,
+    end: usize,
+    skip_start: usize,
+    bits1: &[i32],
+    bits2: &[i32],
+    thresh: &[i32],
+    cap: &[i32],
+    mut total: i32,
+    balance: &mut i32,
+    skip_rsv: i32,
+    intensity: &mut i32,
+    mut intensity_rsv: i32,
+    dual_stereo: &mut i32,
+    mut dual_stereo_rsv: i32,
+    pulses: &mut [i32],
+    ebits: &mut [i32],
+    fine_priority: &mut [i32],
+    c_ch: i32,
+    lm: i32,
+    dec: &mut RangeDecoder,
 ) -> usize {
     let alloc_floor = c_ch << BITRES;
     let stereo = (c_ch > 1) as i32;
@@ -1392,7 +1583,11 @@ fn interp_bits2pulses(
         total += dual_stereo_rsv;
         dual_stereo_rsv = 0;
     }
-    *dual_stereo = if dual_stereo_rsv > 0 { dec.dec_bit_logp(1) as i32 } else { 0 };
+    *dual_stereo = if dual_stereo_rsv > 0 {
+        dec.dec_bit_logp(1) as i32
+    } else {
+        0
+    };
     let mut left = total - psum;
     let perc = left / (eb(coded_bands as usize) - eb(start));
     left -= (eb(coded_bands as usize) - eb(start)) * perc;
@@ -1412,7 +1607,12 @@ fn interp_bits2pulses(
         if n > 1 {
             let mut excess = (bit - cap[j]).max(0);
             pulses[j] = bit - excess;
-            let den = c_ch * n + if c_ch == 2 && n > 2 && *dual_stereo == 0 && (j as i32) < *intensity { 1 } else { 0 };
+            let den = c_ch * n
+                + if c_ch == 2 && n > 2 && *dual_stereo == 0 && (j as i32) < *intensity {
+                    1
+                } else {
+                    0
+                };
             let nclogn = den * (opus_tables::LOGN400[j] as i32 + logm);
             let mut offset = (nclogn >> 1) - den * FINE_OFFSET;
             if n == 2 {
@@ -1459,9 +1659,21 @@ fn interp_bits2pulses(
 
 #[allow(clippy::too_many_arguments)]
 fn compute_allocation(
-    start: usize, end: usize, offsets: &[i32], cap: &[i32], alloc_trim: i32, intensity: &mut i32,
-    dual_stereo: &mut i32, mut total: i32, balance: &mut i32, pulses: &mut [i32], ebits: &mut [i32],
-    fine_priority: &mut [i32], c_ch: i32, lm: i32, dec: &mut RangeDecoder,
+    start: usize,
+    end: usize,
+    offsets: &[i32],
+    cap: &[i32],
+    alloc_trim: i32,
+    intensity: &mut i32,
+    dual_stereo: &mut i32,
+    mut total: i32,
+    balance: &mut i32,
+    pulses: &mut [i32],
+    ebits: &mut [i32],
+    fine_priority: &mut [i32],
+    c_ch: i32,
+    lm: i32,
+    dec: &mut RangeDecoder,
 ) -> usize {
     total = total.max(0);
     let len = NB_EBANDS;
@@ -1483,7 +1695,12 @@ fn compute_allocation(
     let mut trim_offset = vec![0i32; len];
     for j in start..end {
         thresh[j] = ((c_ch) << BITRES).max((3 * (eb(j + 1) - eb(j)) << lm << BITRES) >> 4);
-        trim_offset[j] = c_ch * (eb(j + 1) - eb(j)) * (alloc_trim - 5 - lm) * (end as i32 - j as i32 - 1) * (1 << (lm + BITRES)) >> 6;
+        trim_offset[j] = c_ch
+            * (eb(j + 1) - eb(j))
+            * (alloc_trim - 5 - lm)
+            * (end as i32 - j as i32 - 1)
+            * (1 << (lm + BITRES))
+            >> 6;
         if (eb(j + 1) - eb(j)) << lm == 1 {
             trim_offset[j] -= c_ch << BITRES;
         }
@@ -1525,7 +1742,11 @@ fn compute_allocation(
     for j in start..end {
         let n = eb(j + 1) - eb(j);
         let mut b1 = c_ch * n * (av[lo as usize][j] as i32) << lm >> 2;
-        let mut b2 = if hi >= nb_alloc { cap[j] } else { c_ch * n * (av[hi as usize][j] as i32) << lm >> 2 };
+        let mut b2 = if hi >= nb_alloc {
+            cap[j]
+        } else {
+            c_ch * n * (av[hi as usize][j] as i32) << lm >> 2
+        };
         if b1 > 0 {
             b1 = 0.max(b1 + trim_offset[j]);
         }
@@ -1544,8 +1765,26 @@ fn compute_allocation(
         bits2[j] = b2;
     }
     interp_bits2pulses(
-        start, end, skip_start, &bits1, &bits2, &thresh, cap, total, balance, skip_rsv, intensity,
-        intensity_rsv, dual_stereo, dual_stereo_rsv, pulses, ebits, fine_priority, c_ch, lm, dec,
+        start,
+        end,
+        skip_start,
+        &bits1,
+        &bits2,
+        &thresh,
+        cap,
+        total,
+        balance,
+        skip_rsv,
+        intensity,
+        intensity_rsv,
+        dual_stereo,
+        dual_stereo_rsv,
+        pulses,
+        ebits,
+        fine_priority,
+        c_ch,
+        lm,
+        dec,
     )
 }
 
@@ -1593,15 +1832,37 @@ pub fn celt_alloc_demo(data: &[u8]) -> Result<String, String> {
         }
     }
     tell = dec.tell();
-    let is_transient = if lm > 0 && tell + 3 <= total_bits { dec.dec_bit_logp(3) != 0 } else { false };
+    let is_transient = if lm > 0 && tell + 3 <= total_bits {
+        dec.dec_bit_logp(3) != 0
+    } else {
+        false
+    };
     tell = dec.tell();
-    let intra = if tell + 3 <= total_bits { dec.dec_bit_logp(3) != 0 } else { false };
+    let intra = if tell + 3 <= total_bits {
+        dec.dec_bit_logp(3) != 0
+    } else {
+        false
+    };
     let mut old_e = vec![0f64; nb * c_ch as usize];
-    unquant_coarse_energy(&mut dec, start, end, &mut old_e, intra, c_ch as usize, lm as usize, nb, total_bits);
+    unquant_coarse_energy(
+        &mut dec,
+        start,
+        end,
+        &mut old_e,
+        intra,
+        c_ch as usize,
+        lm as usize,
+        nb,
+        total_bits,
+    );
     let mut tf_res = vec![0i32; nb];
     tf_decode(start, end, is_transient, &mut tf_res, lm, &mut dec);
     tell = dec.tell();
-    let _spread = if tell + 4 <= total_bits { dec.dec_icdf(&SPREAD_ICDF, 5) } else { 2 };
+    let _spread = if tell + 4 <= total_bits {
+        dec.dec_icdf(&SPREAD_ICDF, 5)
+    } else {
+        2
+    };
     let mut cap = vec![0i32; nb];
     init_caps(&mut cap, lm, c_ch, nb);
     let mut offsets = vec![0i32; nb];
@@ -1628,17 +1889,38 @@ pub fn celt_alloc_demo(data: &[u8]) -> Result<String, String> {
             dynalloc_logp = 2.max(dynalloc_logp - 1);
         }
     }
-    let alloc_trim = if tellf + (6 << BITRES) <= total_bits { dec.dec_icdf(&TRIM_ICDF, 7) as i32 } else { 5 };
+    let alloc_trim = if tellf + (6 << BITRES) <= total_bits {
+        dec.dec_icdf(&TRIM_ICDF, 7) as i32
+    } else {
+        5
+    };
     let mut bits = (len * 8 << BITRES) - dec.tell_frac() as i32 - 1;
-    let anti_collapse_rsv = if is_transient && lm >= 2 && bits >= ((lm + 2) << BITRES) { 1 << BITRES } else { 0 };
+    let anti_collapse_rsv = if is_transient && lm >= 2 && bits >= ((lm + 2) << BITRES) {
+        1 << BITRES
+    } else {
+        0
+    };
     bits -= anti_collapse_rsv;
     let mut pulses = vec![0i32; nb];
     let mut fine = vec![0i32; nb];
     let mut fine_pri = vec![0i32; nb];
     let (mut intensity, mut dual_stereo, mut balance) = (0i32, 0i32, 0i32);
     let coded = compute_allocation(
-        start, end, &offsets, &cap, alloc_trim, &mut intensity, &mut dual_stereo, bits, &mut balance,
-        &mut pulses, &mut fine, &mut fine_pri, c_ch, lm, &mut dec,
+        start,
+        end,
+        &offsets,
+        &cap,
+        alloc_trim,
+        &mut intensity,
+        &mut dual_stereo,
+        bits,
+        &mut balance,
+        &mut pulses,
+        &mut fine,
+        &mut fine_pri,
+        c_ch,
+        lm,
+        &mut dec,
     );
     unquant_fine_energy(&mut dec, start, end, &mut old_e, &fine, c_ch as usize, nb);
     let after = dec.tell_frac() as i32;
@@ -1728,7 +2010,15 @@ fn extract_collapse_mask(iy: &[i32], n: usize, b: usize) -> u32 {
 }
 
 /// alg_unquant: decode a unit-norm PVQ shape into X (length N, K pulses).
-pub fn alg_unquant(x: &mut [f64], n: usize, k: usize, spread: i32, b: usize, dec: &mut RangeDecoder, gain: f64) -> u32 {
+pub fn alg_unquant(
+    x: &mut [f64],
+    n: usize,
+    k: usize,
+    spread: i32,
+    b: usize,
+    dec: &mut RangeDecoder,
+    gain: f64,
+) -> u32 {
     let mut iy = vec![0i32; n];
     let ryy = pvq_decode_into(&mut iy, n, k, dec);
     let g = gain / (ryy as f64).sqrt();
@@ -1759,18 +2049,34 @@ pub fn exp_rotation_selftest() -> i32 {
     };
     let mut worst = 0.0f64;
     let mut cases = 0;
-    for &(n, k, b) in &[(16usize, 3usize, 1usize), (32, 5, 1), (32, 4, 2), (64, 8, 4), (24, 2, 1), (48, 6, 2)] {
+    for &(n, k, b) in &[
+        (16usize, 3usize, 1usize),
+        (32, 5, 1),
+        (32, 4, 2),
+        (64, 8, 4),
+        (24, 2, 1),
+        (48, 6, 2),
+    ] {
         for spread in 1..=3 {
-            let orig: Vec<f64> = (0..n).map(|_| (rnd() % 2000) as f64 / 1000.0 - 1.0).collect();
+            let orig: Vec<f64> = (0..n)
+                .map(|_| (rnd() % 2000) as f64 / 1000.0 - 1.0)
+                .collect();
             let mut x = orig.clone();
             exp_rotation(&mut x, n, 1, b, k, spread);
             exp_rotation(&mut x, n, -1, b, k, spread);
-            let err = orig.iter().zip(&x).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+            let err = orig
+                .iter()
+                .zip(&x)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max);
             worst = worst.max(err);
             cases += 1;
         }
     }
-    println!("opus exp_rotation: {cases} cases, max round-trip err = {worst:.2e} [{}]", if worst < 1e-9 { "ok" } else { "FAIL" });
+    println!(
+        "opus exp_rotation: {cases} cases, max round-trip err = {worst:.2e} [{}]",
+        if worst < 1e-9 { "ok" } else { "FAIL" }
+    );
     if worst < 1e-9 {
         0
     } else {
@@ -1843,7 +2149,11 @@ fn compute_qn(n: i32, b: i32, offset: i32, pulse_cap: i32, stereo: bool) -> i32 
 /// Triangular-pdf encode of itheta given qn (the mono long-block case).
 fn theta_encode(enc: &mut RangeEncoder, itheta: i32, qn: i32) {
     let ft = ((qn >> 1) + 1) * ((qn >> 1) + 1);
-    let fs = if itheta <= qn >> 1 { itheta + 1 } else { qn + 1 - itheta };
+    let fs = if itheta <= qn >> 1 {
+        itheta + 1
+    } else {
+        qn + 1 - itheta
+    };
     let fl = if itheta <= qn >> 1 {
         itheta * (itheta + 1) >> 1
     } else {
@@ -1894,7 +2204,11 @@ pub fn theta_selftest() -> i32 {
     }
     // isqrt is the helper the triangular decode depends on (floor sqrt).
     let h_ok = isqrt32(100) == 10 && isqrt32(99) == 9 && isqrt32(0) == 0 && isqrt32(1) == 1;
-    println!("opus theta coding: {total} (qn,itheta) round-trip [{}]{}", if fails == 0 { "ok" } else { "FAIL" }, if h_ok { "" } else { " (isqrt BAD)" });
+    println!(
+        "opus theta coding: {total} (qn,itheta) round-trip [{}]{}",
+        if fails == 0 { "ok" } else { "FAIL" },
+        if h_ok { "" } else { " (isqrt BAD)" }
+    );
     if fails == 0 && h_ok {
         0
     } else {
@@ -1991,7 +2305,16 @@ struct CeltCtx {
 
 /// compute_theta (mono decode path). `n` is the post-split half-size. Returns
 /// (imid, iside, delta, itheta, qalloc); subtracts qalloc from `b`, updates fill.
-fn compute_theta_mono(ctx: &mut CeltCtx, dec: &mut RangeDecoder, n: i32, b: &mut i32, big_b: i32, b0: i32, lm: i32, fill: &mut u32) -> (i32, i32, i32, i32, i32) {
+fn compute_theta_mono(
+    ctx: &mut CeltCtx,
+    dec: &mut RangeDecoder,
+    n: i32,
+    b: &mut i32,
+    big_b: i32,
+    b0: i32,
+    lm: i32,
+    fill: &mut u32,
+) -> (i32, i32, i32, i32, i32) {
     let pulse_cap = opus_tables::LOGN400[ctx.i] as i32 + lm * (1 << BITRES);
     let offset = (pulse_cap >> 1) - QTHETA_OFFSET;
     let qn = compute_qn(n, *b, offset, pulse_cap, false);
@@ -2028,12 +2351,25 @@ fn compute_theta_mono(ctx: &mut CeltCtx, dec: &mut RangeDecoder, n: i32, b: &mut
 
 /// quant_partition (mono decode, resynth). Operates on x in place (len n).
 #[allow(clippy::too_many_arguments)]
-fn quant_partition(ctx: &mut CeltCtx, dec: &mut RangeDecoder, x: &mut [f64], n: i32, mut b: i32, big_b: i32, lowband: Option<&[f64]>, lm: i32, gain: f64, mut fill: u32) -> u32 {
+fn quant_partition(
+    ctx: &mut CeltCtx,
+    dec: &mut RangeDecoder,
+    x: &mut [f64],
+    n: i32,
+    mut b: i32,
+    big_b: i32,
+    lowband: Option<&[f64]>,
+    lm: i32,
+    gain: f64,
+    mut fill: u32,
+) -> u32 {
     let idx = opus_tables::CACHE_INDEX50[((lm + 1) * NB_EBANDS as i32 + ctx.i as i32) as usize];
     let cache_thresh = if idx < 0 {
         i32::MAX
     } else {
-        opus_tables::CACHE_BITS50[idx as usize + opus_tables::CACHE_BITS50[idx as usize] as usize] as i32 + 12
+        opus_tables::CACHE_BITS50[idx as usize + opus_tables::CACHE_BITS50[idx as usize] as usize]
+            as i32
+            + 12
     };
     if lm != -1 && b > cache_thresh && n > 2 {
         let nh = (n >> 1) as usize;
@@ -2061,7 +2397,10 @@ fn quant_partition(ctx: &mut CeltCtx, dec: &mut RangeDecoder, x: &mut [f64], n: 
             delta = 16384;
         } else {
             iside = bitexact_cos(16384 - itheta);
-            delta = frac_mul16(((n >> 1) - 1) << 7, bitexact_log2tan(iside, bitexact_cos(itheta)));
+            delta = frac_mul16(
+                ((n >> 1) - 1) << 7,
+                bitexact_log2tan(iside, bitexact_cos(itheta)),
+            );
         }
         let mid = imid as f64 / 32768.0;
         let side = iside as f64 / 32768.0;
@@ -2085,19 +2424,63 @@ fn quant_partition(ctx: &mut CeltCtx, dec: &mut RangeDecoder, x: &mut [f64], n: 
         let mut cm;
         let rebal = ctx.remaining_bits;
         if mbits >= sbits {
-            cm = quant_partition(ctx, dec, xl, n >> 1, mbits, big_b2, ll, lm2, gain * mid, fill);
+            cm = quant_partition(
+                ctx,
+                dec,
+                xl,
+                n >> 1,
+                mbits,
+                big_b2,
+                ll,
+                lm2,
+                gain * mid,
+                fill,
+            );
             let reb = mbits - (rebal - ctx.remaining_bits);
             if reb > 3 << BITRES && itheta != 0 {
                 sbits += reb - (3 << BITRES);
             }
-            cm |= quant_partition(ctx, dec, xr, n >> 1, sbits, big_b2, lr, lm2, gain * side, fill >> big_b2) << (b0 >> 1);
+            cm |= quant_partition(
+                ctx,
+                dec,
+                xr,
+                n >> 1,
+                sbits,
+                big_b2,
+                lr,
+                lm2,
+                gain * side,
+                fill >> big_b2,
+            ) << (b0 >> 1);
         } else {
-            cm = quant_partition(ctx, dec, xr, n >> 1, sbits, big_b2, lr, lm2, gain * side, fill >> big_b2) << (b0 >> 1);
+            cm = quant_partition(
+                ctx,
+                dec,
+                xr,
+                n >> 1,
+                sbits,
+                big_b2,
+                lr,
+                lm2,
+                gain * side,
+                fill >> big_b2,
+            ) << (b0 >> 1);
             let reb = sbits - (rebal - ctx.remaining_bits);
             if reb > 3 << BITRES && itheta != 16384 {
                 mbits += reb - (3 << BITRES);
             }
-            cm |= quant_partition(ctx, dec, xl, n >> 1, mbits, big_b2, ll, lm2, gain * mid, fill);
+            cm |= quant_partition(
+                ctx,
+                dec,
+                xl,
+                n >> 1,
+                mbits,
+                big_b2,
+                ll,
+                lm2,
+                gain * mid,
+                fill,
+            );
         }
         let _ = &mut mbits;
         cm
@@ -2137,7 +2520,11 @@ fn quant_partition(ctx: &mut CeltCtx, dec: &mut RangeDecoder, x: &mut [f64], n: 
                     Some(lb) => {
                         for j in 0..nu {
                             ctx.seed = lcg_rand(ctx.seed);
-                            let tmp = if ctx.seed & 0x8000 != 0 { 1.0 / 256.0 } else { -1.0 / 256.0 };
+                            let tmp = if ctx.seed & 0x8000 != 0 {
+                                1.0 / 256.0
+                            } else {
+                                -1.0 / 256.0
+                            };
                             x[j] = lb[j] + tmp;
                         }
                         renormalise_vector(&mut x[..nu], gain);

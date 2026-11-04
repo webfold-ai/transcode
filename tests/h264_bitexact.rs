@@ -93,11 +93,7 @@ fn ffmpeg_decode_yuv420p(stream: &[u8], tag: &str) -> Vec<u8> {
 
 // Compare ffmpeg's decoded yuv420p against the encoder's reconstruction,
 // frame by frame, byte-exact.
-fn assert_bitexact(
-    decoded: &[u8],
-    recons: &[(Vec<u8>, Vec<u8>, Vec<u8>)],
-    label: &str,
-) {
+fn assert_bitexact(decoded: &[u8], recons: &[(Vec<u8>, Vec<u8>, Vec<u8>)], label: &str) {
     let (w, h) = (W as usize, H as usize);
     let ysz = w * h;
     let csz = (w / 2) * (h / 2);
@@ -118,8 +114,11 @@ fn assert_bitexact(
             [("Y", (dy, ry)), ("Cb", (dcb, rcb)), ("Cr", (dcr, rcr))].into_iter()
         {
             assert_eq!(dec.len(), ours.len(), "{label} f{f} {plane}: size mismatch");
-            if let Some((idx, (&a, &b))) =
-                dec.iter().zip(ours.iter()).enumerate().find(|(_, (a, b))| a != b)
+            if let Some((idx, (&a, &b))) = dec
+                .iter()
+                .zip(ours.iter())
+                .enumerate()
+                .find(|(_, (a, b))| a != b)
             {
                 let ndiff = dec.iter().zip(ours.iter()).filter(|(a, b)| a != b).count();
                 panic!(
@@ -161,7 +160,10 @@ fn i4x4_decodes_bitexact_in_ffmpeg() {
         eprintln!("SKIP: ffmpeg not available — cannot run the decode oracle");
         return;
     }
-    run_path("i4x4", transcode::h264_intra::encode_sequence_i4x4_with_recon);
+    run_path(
+        "i4x4",
+        transcode::h264_intra::encode_sequence_i4x4_with_recon,
+    );
 }
 
 #[test]
@@ -172,7 +174,10 @@ fn adaptive_decodes_bitexact_in_ffmpeg() {
     }
     // The per-MB free-energy decision mixes I_16x16 and I_4x4 MBs in one slice;
     // ffmpeg must still reconstruct every MB exactly.
-    run_path("adaptive", transcode::h264_intra::encode_sequence_adaptive_with_recon);
+    run_path(
+        "adaptive",
+        transcode::h264_intra::encode_sequence_adaptive_with_recon,
+    );
 }
 
 #[test]
@@ -191,25 +196,49 @@ fn mp4_product_path_decodes_in_ffmpeg() {
     std::fs::write(&path, &mp4).expect("write mp4");
     // demux + decode with no errors
     let dec = Command::new("ffmpeg")
-        .args(["-hide_banner", "-v", "error", "-i", &path, "-f", "null", "-"])
+        .args([
+            "-hide_banner",
+            "-v",
+            "error",
+            "-i",
+            &path,
+            "-f",
+            "null",
+            "-",
+        ])
         .status()
         .expect("spawn ffmpeg");
     assert!(dec.success(), "ffmpeg failed to decode the muxed MP4");
     // ffprobe: it really is H.264 at W×H
     let probe = Command::new("ffprobe")
         .args([
-            "-hide_banner", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name,width,height",
-            "-of", "csv=p=0", &path,
+            "-hide_banner",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,width,height",
+            "-of",
+            "csv=p=0",
+            &path,
         ])
         .output()
         .expect("spawn ffprobe");
     let s = String::from_utf8_lossy(&probe.stdout);
     assert!(s.contains("h264"), "not an h264 track: {s}");
-    assert!(s.contains(&W.to_string()) && s.contains(&H.to_string()), "wrong dims: {s}");
+    assert!(
+        s.contains(&W.to_string()) && s.contains(&H.to_string()),
+        "wrong dims: {s}"
+    );
     // the compressed MP4 must be far smaller than raw I_PCM (≈ YUV420 raw size)
     let ipcm_floor = (W * H * 3 / 2) as usize;
-    assert!(mp4.len() < ipcm_floor, "not compressed: {} >= {}", mp4.len(), ipcm_floor);
+    assert!(
+        mp4.len() < ipcm_floor,
+        "not compressed: {} >= {}",
+        mp4.len(),
+        ipcm_floor
+    );
 }
 
 // `cargo test --release --test h264_bitexact -- --ignored --nocapture report_sizes`
@@ -226,9 +255,13 @@ fn report_sizes() {
         let frames = vec![pattern(kind)];
         println!("\n[{kind}]");
         for qp in [18i32, 26, 34, 40] {
-            let (s16, _) = transcode::h264_intra::encode_sequence_with_recon(&frames, W, H, qp).unwrap();
-            let (s4, _) = transcode::h264_intra::encode_sequence_i4x4_with_recon(&frames, W, H, qp).unwrap();
-            let (sa, _) = transcode::h264_intra::encode_sequence_adaptive_with_recon(&frames, W, H, qp).unwrap();
+            let (s16, _) =
+                transcode::h264_intra::encode_sequence_with_recon(&frames, W, H, qp).unwrap();
+            let (s4, _) =
+                transcode::h264_intra::encode_sequence_i4x4_with_recon(&frames, W, H, qp).unwrap();
+            let (sa, _) =
+                transcode::h264_intra::encode_sequence_adaptive_with_recon(&frames, W, H, qp)
+                    .unwrap();
             let best = s16.len().min(s4.len());
             println!(
                 "  qp{qp:>2}: i16={:>5}B  i4x4={:>5}B  adaptive={:>5}B  (vs best-fixed {:+.0}%)",
