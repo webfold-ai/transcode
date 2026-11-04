@@ -13,7 +13,7 @@ that a score has been earned.
 | Pinned-Dependencies | Every `uses:` is a full commit SHA. Tags are verified with `git ls-remote` (see docs/SUPPLY-CHAIN.md). `cargo` dependencies are pinned by `Cargo.lock`. | In repo; Verified for the SHAs listed in SUPPLY-CHAIN.md |
 | SAST | `codeql.yml` (Rust, `security-extended`) and `cargo clippy -D warnings` in CI | In repo |
 | Fuzzing | `fuzz/` with seven libFuzzer targets (`libfuzzer_sys` marker) and `fuzz.yml` (pull requests and daily) | In repo; targets compile on stable (`cargo check`). No long campaign run yet |
-| Signed-Releases | `release.yml`: cosign keyless signatures (`.sig`, `.cert`), SLSA provenance (`.intoto.jsonl`) | In repo; not yet exercised by a real tag |
+| Signed-Releases | `release.yml`: cosign keyless signing bundles (`.sigstore.json`), SLSA provenance (`.intoto.jsonl`) | In repo; not yet exercised by a real tag |
 | Packaging | Not applicable yet. The crate sets no `publish` flag. Release assets are GitHub release tarballs, not a package registry | Human (decide whether to publish to crates.io) |
 | Branch-Protection | Ruleset (see below) | Human. Not applied |
 | CI-Tests | `ci.yml` runs build, tests (with ffmpeg), fmt and clippy on every pull request | In repo |

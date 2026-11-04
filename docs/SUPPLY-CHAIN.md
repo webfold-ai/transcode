@@ -68,7 +68,8 @@ contains:
 
 - `transcode-vX.Y.Z-linux-x86_64.tar.gz`, the CLI binary with `LICENSE-MIT` and `README.md`,
 - `SHA256SUMS`, with a sha256 for the tarball,
-- `.sig` and `.cert` files from cosign keyless signing (identity: the release workflow at the tag),
+- `.sigstore.json` bundles from cosign keyless signing (one each for the tarball and `SHA256SUMS`),
+  containing the signature, the certificate and the transparency-log proof,
 - `.intoto.jsonl`, the SLSA build-provenance attestation.
 
 How to verify a downloaded release (replace `v0.1.0` with the version you downloaded):
@@ -77,8 +78,7 @@ How to verify a downloaded release (replace `v0.1.0` with the version you downlo
 sha256sum -c SHA256SUMS
 
 cosign verify-blob \
-  --certificate transcode-v0.1.0-linux-x86_64.tar.gz.cert \
-  --signature transcode-v0.1.0-linux-x86_64.tar.gz.sig \
+  --bundle transcode-v0.1.0-linux-x86_64.tar.gz.sigstore.json \
   --certificate-identity-regexp '^https://github.com/webfold-ai/transcode/\.github/workflows/release\.yml@refs/tags/v0\.1\.0$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   transcode-v0.1.0-linux-x86_64.tar.gz
