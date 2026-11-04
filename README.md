@@ -49,6 +49,26 @@ encoder. Round-trip and external-decoder checks are listed in the Verification s
 Other modules: `preview` renders a decoded RGBA image as a grayscale text preview
 (`src/preview.rs`).
 
+## Standards and licensing
+
+Each format above follows a published specification, listed with its standards body in
+[docs/STANDARDS.md](docs/STANDARDS.md). The table there gives the licensing and patent position as
+understood for each one, with a link to check it.
+
+- **Described as royalty-free by their publishers:** PNG (W3C), FLAC (Xiph), Opus (IETF RFC 6716),
+  AV1 (AOMedia royalty-free patent licence), WebP (Google royalty-free patent licence).
+- **Patent-pool or unclear:** H.264 and AAC (patent pools; royalties can apply), MP3 (core patents
+  understood to have expired, but the position varies by country), and JPEG (baseline understood
+  to be royalty-free; to be confirmed).
+- **Containers:** the MP4, Matroska and HEIF writers carry H.264 here, so the H.264 position applies
+  to their output. The Motion-JPEG AVI writer is not an ISO standard and was not reviewed.
+
+An open standard is not automatically royalty-free. The publication status of each row has not
+been checked against its primary source yet; see the "Verified" column in docs/STANDARDS.md.
+
+This crate is a codec implementation. It is not certified against any conformance suite and is
+not a licensed product from any codec vendor.
+
 ## Build and test
 
 ```sh

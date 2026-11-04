@@ -46,15 +46,15 @@ been created or recorded here.
 
 ## Open items
 
-1. **CODEOWNERS placeholders.** `.github/CODEOWNERS` lists `@OWNER-1 @OWNER-2`. These are not real
-   accounts. Replace them with two or more human maintainers before the code-owner rule is
-   enabled. Do not use bot accounts. **Human**
+1. **CODEOWNERS.** Resolved. `.github/CODEOWNERS` lists `@twn-lloyd @yokoszn`, two human owners,
+   as the owners instructed. The ruleset still needs applying (item 6). No bot accounts are listed.
 2. **Licensing.** Cargo.toml and `LICENSE-MIT` say MIT. An earlier README said `MIT OR Apache-2.0`.
    Decide, and if dual licensing is wanted, add `LICENSE-APACHE` and change Cargo.toml. **Human**
-3. **Patents.** The H.264, AAC and MP3 coverage described in the README needs a legal review
-   before publication. **Human**
-4. **Code of conduct contact.** No dedicated contact exists yet. CODE_OF_CONDUCT.md routes reports
-   through private reporting for now. **Human**
+3. **Patents and standards.** The per-format position is in docs/STANDARDS.md. Every row is still
+   unverified against its primary source, and H.264, AAC, MP3 and the containers that carry them
+   need counsel's review before publication. **Human**
+4. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists
+   hello@twn.systems, alongside GitHub private reporting.
 5. **Visibility.** The repository is private. Scorecard publishing, the badges and
    dependency-review on private repositories (which needs GitHub Advanced Security) depend on this.
    **Human**
