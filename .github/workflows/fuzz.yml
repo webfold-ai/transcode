@@ -1,0 +1,51 @@
+name: Fuzz
+
+# cargo-fuzz (libFuzzer) runs every decoder target that accepts untrusted bytes.
+# Short runs on pull requests that touch code, and a longer scheduled run every day,
+# so the Scorecard Fuzzing check sees continuous fuzzing.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "fuzz/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/fuzz.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: cargo-fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz_png, fuzz_jpeg, fuzz_flac, fuzz_slac, fuzz_mp3, fuzz_aac, fuzz_opus]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master as of 2026-11-04
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+      - name: Run ${{ matrix.target }}
+        run: cargo +nightly fuzz run ${{ matrix.target }} --fuzz-dir fuzz -- -max_total_time=180 -rss_limit_mb=4096
+      - name: Keep crash inputs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          retention-days: 30
+          if-no-files-found: ignore

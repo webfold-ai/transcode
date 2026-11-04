@@ -1,0 +1,42 @@
+# cargo-deny policy for transcode.
+#
+# Run from the repository root:
+#   cargo deny check advisories bans licenses sources
+#
+# transcode has no git dependencies. Anything added from a git or unknown registry
+# source is denied on purpose; add an explicit, reviewed exception here if one is
+# ever needed.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+]
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

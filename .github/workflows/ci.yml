@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    # This job name is the required status check ("Rust checks") in the
+    # default-branch ruleset. Renaming it requires updating the ruleset too.
+    name: Rust checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Several integration tests use ffmpeg as an external decoder oracle. They skip
+      # when ffmpeg is absent, so install it explicitly to make the job meaningful.
+      - name: Install ffmpeg (test oracle)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master as of 2026-11-04
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Build
+        run: cargo build --locked --all-targets
+      - name: Test
+        run: cargo test --locked --no-fail-fast
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  msrv:
+    name: MSRV 1.89
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master as of 2026-11-04
+        with:
+          toolchain: "1.89.0"
+      # Build only. The MSRV job does not run tests, so it is not a full test gate on 1.89.
+      - name: Build on the minimum supported Rust version
+        run: cargo build --locked --all-targets

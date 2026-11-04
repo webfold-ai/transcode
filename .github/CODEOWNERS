@@ -1,0 +1,4 @@
+# Code ownership for the required code-owner review on the default-branch
+# ruleset. Two or more owners so an authoring owner is never locked out
+# of merging their own change.
+*       @OWNER-1 @OWNER-2

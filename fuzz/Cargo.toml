@@ -1,0 +1,67 @@
+[package]
+name = "transcode-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.transcode]
+path = ".."
+
+# Standalone workspace so the fuzz crate does not join the transcode package's workspace.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_png"
+path = "fuzz_targets/fuzz_png.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_jpeg"
+path = "fuzz_targets/fuzz_jpeg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_flac"
+path = "fuzz_targets/fuzz_flac.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_slac"
+path = "fuzz_targets/fuzz_slac.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_mp3"
+path = "fuzz_targets/fuzz_mp3.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_aac"
+path = "fuzz_targets/fuzz_aac.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_opus"
+path = "fuzz_targets/fuzz_opus.rs"
+test = false
+doc = false
+bench = false
