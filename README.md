@@ -1,152 +1,124 @@
 # transcode
 
-![transcode social preview](assets/social-card.png)
+[![CI](https://github.com/webfold-ai/transcode/actions/workflows/ci.yml/badge.svg)](https://github.com/webfold-ai/transcode/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/webfold-ai/transcode/badge)](https://scorecard.dev/viewer/?uri=github.com/webfold-ai/transcode)
 
-**Zero-dependency PDF image decoder.** Extract and decode image streams from PDF files.
-Pure Rust, std only — no libc, no ffmpeg, no C libraries.
+Pure-Rust audio, image and video codecs, written from scratch. The library uses only `std`:
+no ffmpeg, libpng, libjpeg, zlib or other C libraries at runtime.
 
-Used by [pdffold](https://github.com/Ptyktos/pdffold) for image extraction during
-PDF-to-markdown conversion. Sovereign from-scratch JPEG and PNG codecs handle the
-image formats embedded in PDF content streams.
+**Status: 0.1.0, pre-release.** Some formats are complete in both directions and others are
+partial or encode-only. The per-format table below and [ROADMAP.md](ROADMAP.md) are the
+authoritative status. Nothing here is a claim of conformance with a specification beyond what
+the tests check.
 
-## Quick start
+## Patents and licensing: open decision
 
-```toml
-[dependencies]
-transcode = "0.1"
-```
+**This section must be read before the crate is distributed.** It is not resolved.
 
-```bash
-cargo build --release
-```
+- Several formats in this crate are covered by patents in some jurisdictions. H.264 and AAC are
+  the main examples, and both are licensed through patent pools. MP3 patents have largely
+  expired, but the position varies by country. The MP4, MKV and HEIF writers carry H.264 here, so the same
+  questions apply to their output. Container licensing has not been reviewed.
+- AV1 is described by its licensors as royalty-free under published terms. That is not the same
+  as a statement that no patent applies.
+- Nothing in this repository is a patent search, a licensing opinion, or a grant of patent
+  rights. Do not describe the crate as patent-free.
+- Maintainers need to decide, with counsel, whether and how these codecs are published. That
+  decision is tracked as an open item in [docs/OPENSSF.md](docs/OPENSSF.md).
 
-Decode images from a PDF via the CLI:
+## What works today
 
-```bash
-# Extract + decode all JPEG and PNG image streams to RGBA
-transcode extract in.pdf --out-dir ./frames
+Status is taken from [ROADMAP.md](ROADMAP.md) and the source. "Encode" means the crate's own
+encoder. Round-trip and external-decoder checks are listed in the Verification section.
 
-# Pipe raw image stream bytes from a PDF object
-cat obj-stream.bin | transcode decode --fmt auto > decoded.rgba
-```
+| Format | Decode | Encode | Notes |
+|---|:--:|:--:|---|
+| PNG | RGBA8 | RGBA8 | 8-bit, non-interlaced only (`src/png.rs`) |
+| JPEG | Baseline | Baseline | Sequential Huffman only. Progressive files return an error (`src/jpeg.rs`) |
+| WebP | - | Lossless (VP8L) | Encoder output has no predictive transforms or colour cache, so files are large (`src/webp.rs`) |
+| RIFF WAV | yes | yes | CLI path; 8/16/24/32-bit integer and 32-bit float (ROADMAP.md) |
+| FLAC | yes | yes | Standard `.flac` output (ROADMAP.md) |
+| SLAC | yes | yes | This crate's own lossless container (ROADMAP.md) |
+| MP3 (Layer III) | yes | no | Decode to PCM; no encoder planned (ROADMAP.md) |
+| AAC-LC (ADTS) | yes | yes | MDCT, Huffman, closed-form rate control (ROADMAP.md) |
+| Opus | partial | no | Ogg demux, OpusHead and TOC parsing. No packet-to-PCM decode yet (ROADMAP.md) |
+| H.264 | no | intra and P-skip | Annex-B output. Used by the MP4, MKV and HEIF muxers (`src/h264.rs`) |
+| AV1 | no | keyframes | Experimental. Covers synthetic 64x64 keyframes (`src/av1_frame.rs`) |
+| MP4, MKV, HEIF, Motion-JPEG AVI | no | muxers | Container writers only (`src/mp4.rs`, `src/mkv.rs`, `src/heif.rs`, `src/mjpeg.rs`) |
 
-## Features
+Other modules: `preview` renders a decoded RGBA image as a grayscale text preview
+(`src/preview.rs`).
 
-- **JPEG decode** — baseline sequential DCT, Huffman entropy coding (no arithmetic,
-  no progressive). Grayscale + YCbCr with arbitrary sampling factors (4:2:0, 4:2:2,
-  4:4:4), restart markers. Output is canonical 8-bit RGBA.
-- **PNG decode** — all color types (grayscale, RGB, palette, gray+alpha, RGBA),
-  8-bit depth, non-interlaced. Full DEFLATE inflate (stored / fixed-Huffman /
-  dynamic-Huffman) + zlib wrapper + scanline filters.
-- **Zero dependencies** — from-scratch implementations of JPEG DCT/Huffman, PNG
-  DEFLATE/CRC-32/Adler-32. No libpng, libjpeg, zlib, or system libraries.
-- **Container probes** — parse stream headers without full decode (dimensions,
-  color type, compression params).
-- **RGBA canonical output** — both codecs produce the same `Image` struct (`Vec<u8>`
-  RGBA pixels, width, height), so downstream consumers handle one format.
-
-## How it works
-
-PDF files embed image streams as compressed object data, typically JPEG DCT or PNG
-deflate. transcode provides the decode engines for both formats:
-
-- **JPEG path:** Parse SOI–EOI markers, extract quantization + Huffman tables,
-  decode MCU blocks via separable DCT, upsample chroma components to full
-  resolution, output RGBA.
-- **PNG path:** Parse chunk stream (IHDR → IDAT → IEND), inflate DEFLATE-compressed
-  scanline data (dynamic or fixed Huffman), reverse the per-scanline filter (none,
-  sub, up, average, Paeth), assemble RGBA pixels.
-
-Both codecs are standalone implementations — no wrappers around system libraries,
-no FFI, no `build.rs` probes. The JPEG decoder uses a clean direct separable float
-DCT (AAN/FFT fast path available as a drop-in); the PNG decoder includes a complete
-DEFLATE inflate with LZ77 hash-chain match finding.
-
-```
-PDF object ──▶ JPEG marker scan ──▶ Huffman decode ──▶ iDCT ──▶ RGBA pixels
-             or
-             ▶ PNG chunk parse ──▶ DEFLATE inflate ──▶ unfilter ──▶ RGBA pixels
-```
-
-## Library API
-
-```rust
-// Decode JPEG bytes → RGBA image
-let img = transcode::jpeg::decode(&bytes)?;
-
-// Decode PNG bytes → RGBA image
-let img = transcode::png::decode(&bytes)?;
-```
-
-Both return `Image { width: u32, height: u32, pixels: Vec<u8> }` where `pixels`
-is RGBA8, row-major, `width * height * 4` bytes.
-
-## Related Projects (Ptyktos ecosystem)
-
-- **[pdffold](https://github.com/Ptyktos/pdffold)** — PDF-to-markdown using transcode
-  for image stream extraction
-- **[swarm](https://github.com/TWN-Systems/swarm)** — swarm prediction via
-  stationary-phase collapse
-- **[talon](https://github.com/TWN-Systems/talon)** — mail-security adapter on the
-  same collapse engine
-- **[cerealize](https://github.com/TWN-Systems/collapse_wire)** — zero-dependency
-  Rust serialization via the x=B/U Null residual
-- **Sanguine** — the Lean proof corpus; the fixed-point kernels in this crate derive
-  from `proof/PolyphaseCollapse.lean` and `proof/IIRFilterCollapse.lean`
-
-Also from the fold-family: **[chunkfold](https://github.com/Ptyktos/chunkfold)**,
-**[textfold](https://github.com/Ptyktos/textfold)**,
-**[webfold](https://github.com/Ptyktos/webfold)**,
-**[sdirstat](https://github.com/Ptyktos/sdirstat)**.
-
-## License
-
-MIT
-
-Sovereign, ffmpeg-free audio + image codec crate — pure Rust, zero
-non-Ptyktos dependencies.
-
-## What it is
-
-transcode is the Ptyktos fold-extracted codec layer. PNG, JPEG, AAC, AV1,
-H.264, FLAC, MP3, MP4, HEIF, WEBP, NIfTI, HDF5 — all decoded and encoded
-without leaving the ptyktos substrate (no ffmpeg, no libpng, no libjpeg).
-
-Lives on the ptyktos substrate because Ptyktos's image + audio pipelines
-(`memoryfold`, the audio-folders, the `glossa` localization engine, the
-peregrine-ng extraction service) all want to handle media without
-shipping ffmpeg.
-
-## What lives here
-
-| Surface | Path |
-|---|---|
-| Crate | `src/lib.rs` |
-| PNG decoder/encoder | `src/codec/png/` |
-| JPEG decoder/encoder | `src/codec/jpeg/` |
-| AAC decoder/encoder | `src/codec/aac/` |
-| AV1 decoder/encoder | `src/codec/av1/` |
-| H.264 decoder/encoder | `src/codec/h264/` |
-| MP4 muxer | `src/mp4/` |
-
-## Build
+## Build and test
 
 ```sh
 cargo build --release
+cargo test --locked
 ```
 
-## See also
+Some integration tests use ffmpeg as an external decoder, so their output is checked against an
+independent implementation. They print `SKIP` and pass when ffmpeg is not installed. CI installs
+ffmpeg, so those checks always run there. The H.264 size report is `#[ignore]`d; run it with
+`cargo test --release --test h264_bitexact -- --ignored --nocapture report_sizes`.
 
-- [`Ptyktos/sangsec`](https://github.com/Ptyktos/sangsec) — uses transcode
-  for embedded-image inspection in agent tool calls
-- [`Ptyktos/glossa`](https://github.com/Ptyktos/glossa) — uses transcode
-  for localization-asset hashing
+Minimum supported Rust version: **1.89** (`rust-version` in `Cargo.toml`, checked in CI).
+
+## Library use
+
+```rust
+use transcode::{flac, png};
+
+let image = png::decode(&bytes)?;           // image.width, image.height, image.pixels (RGBA8)
+let (samples, rate, channels, _bps) = flac::decode(&bytes)?;
+let png_bytes = png::encode(width, height, &rgba_pixels, true)?;
+```
+
+Decoders return `Result<_, String>`. The design goal is that they never panic on malformed
+input; the fuzz targets in `fuzz/` exist to test that goal, and it is not yet proven. The public
+modules are listed in `src/lib.rs`.
+
+## Command line
+
+```sh
+transcode in.wav out.wav --rate 8000 --bits 16 --channels 1   # resample / depth / channels
+transcode --selftest          # resampler, depth and channel-mixing checks
+transcode --codec-selftest    # SLAC lossless round-trip
+transcode --bench 10          # time each operation on a synthetic signal
+```
+
+`src/main.rs` also has flags for individual codec stages (`--from-flac`, `--to-aac`,
+`--from-mp3`, `--png-to-mp4`, and others). Most are self-tests for one stage of one codec.
+
+## Verification
+
+- Unit tests in `src/` cover the entropy coders, transforms and container writers.
+- Integration tests in `tests/` check AV1 and H.264 output against ffmpeg (`tests/av1_*.rs`,
+  `tests/h264_bitexact.rs`).
+- `fuzz/` contains one libFuzzer target per decoder that accepts untrusted bytes: PNG, JPEG,
+  FLAC, SLAC, MP3, AAC and Opus. They run for 180 seconds per target on pull requests and daily in
+  CI. No long-running campaign has been completed yet.
+- Clippy correctness and suspicious lints are denied in CI. Style, complexity and perf lints are
+  allowed for now; see the `[lints.clippy]` note in `Cargo.toml`.
+- `cargo deny` and `cargo audit` run in CI against `Cargo.lock`.
+
+Performance numbers are in [BENCHMARKS.md](BENCHMARKS.md). They come from one machine and mostly
+from a synthetic tone. Read that file before quoting any number.
+
+## Security
+
+- The crate forbids `unsafe` code: `#![forbid(unsafe_code)]` is set on the library and the binary.
+- The library has no runtime dependencies.
+- Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Contributions that add a codec need test vectors,
+an external-decoder check where one exists, and a note on patent status for review.
 
 ## License
 
-SPDX: `MIT OR Apache-2.0`. Ptyktos substrate (fold-extracted).
+MIT. See [LICENSE-MIT](LICENSE-MIT).
 
-The full Ptyktos substrate (PNG, JPEG, AAC, AV1, H.264, FLAC, MP3,
-MP4, HEIF, WEBP, NIfTI, HDF5) is built and consumed by Ptyktos itself
-via fold extraction; transcode exposes the image + audio halves as the
-pde-aligned public surface.
+The repository contains only the MIT license text. An earlier version of this README also said
+"MIT OR Apache-2.0"; that is not reflected in the repository and is part of the open licensing
+decision above.
