@@ -3,6 +3,8 @@
 //! → `(samples i32, rate, channels, bps)` for the STT audio front-end). The `transcode`
 //! binary (`main.rs`) keeps its own module tree; this just makes the codecs reusable.
 
+#![forbid(unsafe_code)]
+
 pub mod aac;
 pub mod aac_tables;
 pub mod av1_dct;
