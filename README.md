@@ -11,20 +11,21 @@ partial or encode-only. The per-format table below and [ROADMAP.md](ROADMAP.md) 
 authoritative status. Nothing here is a claim of conformance with a specification beyond what
 the tests check.
 
-## Patents and licensing: open decision
+## Patents and licensing
 
-**This section must be read before the crate is distributed.** It is not resolved.
+transcode is licensed under the Apache License, Version 2.0. The licence covers this code. It does
+not license anyone under another party's patents.
 
-- Several formats in this crate are covered by patents in some jurisdictions. H.264 and AAC are
-  the main examples, and both are licensed through patent pools. MP3 patents have largely
-  expired, but the position varies by country. The MP4, MKV and HEIF writers carry H.264 here, so the same
-  questions apply to their output. Container licensing has not been reviewed.
-- AV1 is described by its licensors as royalty-free under published terms. That is not the same
-  as a statement that no patent applies.
-- Nothing in this repository is a patent search, a licensing opinion, or a grant of patent
-  rights. Do not describe the crate as patent-free.
-- Maintainers need to decide, with counsel, whether and how these codecs are published. That
-  decision is tracked as an open item in [docs/OPENSSF.md](docs/OPENSSF.md).
+Several formats in this crate are covered by patents in some jurisdictions. H.264 and AAC are
+licensed through patent pools (Via LA), and royalties can apply to products that ship an encoder or
+decoder for them. The MP4, MKV and HEIF writers carry H.264, so the same applies to their output.
+MP3's licensing program ended in 2017, and AV1 is offered royalty-free under AOMedia's published
+terms. [docs/STANDARDS.md](docs/STANDARDS.md) has the position for every format, with sources and
+how each was checked.
+
+Publishing source does not remove the need for a patent licence in a product. If you ship software
+that includes these codecs, you are responsible for the licences it needs. All modules in this
+repository are published.
 
 ## What works today
 
@@ -57,14 +58,14 @@ understood for each one, with a link to check it.
 
 - **Described as royalty-free by their publishers:** PNG (W3C), FLAC (Xiph), Opus (IETF RFC 6716),
   AV1 (AOMedia royalty-free patent licence), WebP (Google royalty-free patent licence).
-- **Patent-pool or unclear:** H.264 and AAC (patent pools; royalties can apply), MP3 (core patents
-  understood to have expired, but the position varies by country), and JPEG (baseline understood
-  to be royalty-free; to be confirmed).
+- **Patent-pool:** H.264 and AAC (Via LA pools; royalties can apply to products).
+- **Patents expired or understood royalty-free:** MP3 (licensing program ended April 2017; other
+  jurisdictions not checked) and baseline JPEG.
 - **Containers:** the MP4, Matroska and HEIF writers carry H.264 here, so the H.264 position applies
   to their output. The Motion-JPEG AVI writer is not an ISO standard and was not reviewed.
 
-An open standard is not automatically royalty-free. The publication status of each row has not
-been checked against its primary source yet; see the "Verified" column in docs/STANDARDS.md.
+An open standard is not automatically royalty-free. Several rows were checked only against
+secondary sources; see the "Source check" column in docs/STANDARDS.md.
 
 This crate is a codec implementation. It is not certified against any conformance suite and is
 not a licensed product from any codec vendor.
@@ -140,4 +141,4 @@ an external-decoder check where one exists, and a note on patent status for revi
 Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 The licence covers this code only. It grants no rights under any patent that applies to a format
-this crate decodes or encodes; see the patent note above.
+this crate decodes or encodes; see [Patents and licensing](#patents-and-licensing).

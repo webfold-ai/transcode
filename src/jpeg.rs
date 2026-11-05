@@ -352,11 +352,19 @@ impl<'a> JpegBitReader<'a> {
         b
     }
     fn get_bits(&mut self, n: u32) -> u32 {
+        // The bit count comes from a Huffman symbol, which can name up to 255 bits. Valid JPEG needs at
+        // most 16 (DC) or 15 (AC), and the accumulator holds 64 bits; clamp so the shift cannot overflow.
+        let n = n.min(32);
         if n == 0 {
             return 0;
         }
         if self.nbits < n {
             self.fill();
+        }
+        // Past the end of the entropy-coded data the accumulator holds zeros. Count them as bits so the
+        // count cannot underflow; valid scans never request bits beyond the marker that ends them.
+        if self.nbits < n {
+            self.nbits = n;
         }
         let v = (self.acc >> (64 - n)) as u32;
         self.acc <<= n;
@@ -408,11 +416,15 @@ fn extend(v: u32, s: u32) -> i32 {
     if s == 0 {
         return 0;
     }
+    // EXTEND is defined for at most 16 bits; the size comes from a Huffman symbol that can name more.
+    let s = s.min(16);
+    // Keep only the s bits EXTEND reads, so a wider value from the caller cannot overflow below.
+    let v = (v & ((1u32 << s) - 1)) as i32;
     let vt = 1i32 << (s - 1);
-    if (v as i32) < vt {
-        v as i32 + (-1i32 << s) + 1
+    if v < vt {
+        v + (-1i32 << s) + 1
     } else {
-        v as i32
+        v
     }
 }
 
@@ -581,12 +593,23 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 if (width as u64) * (height as u64) > 100_000_000 {
                     return Err("JPEG: exceeds 100MP".into());
                 }
-                let nc = data[p + 7] as usize;
+                let nc = *data
+                    .get(p + 7)
+                    .ok_or_else(|| "JPEG: truncated frame header".to_string())?
+                    as usize;
+                // Each component is 3 bytes after the 8-byte fixed part; the segment must hold them all.
+                if len < 8 + 3 * nc {
+                    return Err("JPEG: frame header too short for its component count".into());
+                }
                 comps.clear();
                 for i in 0..nc {
                     let o = p + 8 + i * 3;
                     let id = data[o];
                     let hv = data[o + 1];
+                    // Sampling factors are 1..=4 (ITU-T T.81). Zero would divide by zero in the block layout.
+                    if !(1..=4).contains(&(hv >> 4)) || !(1..=4).contains(&(hv & 0x0F)) {
+                        return Err("JPEG: sampling factor outside 1..=4".into());
+                    }
                     comps.push(Component {
                         id,
                         h: hv >> 4,
@@ -796,8 +819,9 @@ fn decode_scan(
                         // DC
                         let t = br.decode_huff(dch)?;
                         let diff = extend(br.get_bits(t as u32), t as u32);
-                        dc_pred[ci] += diff;
-                        coef[0] = (dc_pred[ci] * qt[0] as i32) as f32;
+                        // Wrapping: the DC predictor is unbounded in the format; valid scans stay in range.
+                        dc_pred[ci] = dc_pred[ci].wrapping_add(diff);
+                        coef[0] = (dc_pred[ci].wrapping_mul(qt[0] as i32)) as f32;
                         // AC
                         let mut k = 1usize;
                         while k < 64 {

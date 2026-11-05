@@ -13,9 +13,11 @@ All notable changes to this project are documented here. The format follows
 - The binary uses the library's codec modules instead of compiling its own copies.
 - `Cargo.toml` records the license, repository, readme and keywords, and sets `rust-version = 1.89`.
 - The library and binary are built with `#![forbid(unsafe_code)]`.
+- README and docs/STANDARDS.md state the patent position of each format. The licence grants no rights under third-party patents.
 
 ### Fixed
 
+- The JPEG and FLAC decoders no longer panic or allocate without bound on malformed input; regression tests are in `tests/fuzz_regressions.rs`.
 - Debug builds no longer panic on the AV1 boolean and coefficient decoding paths. Release
   output is unchanged.
 - Malformed input can no longer make the decoders panic, hang or over-allocate. Four cases found

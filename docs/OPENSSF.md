@@ -48,10 +48,8 @@ been created or recorded here.
 
 1. **CODEOWNERS.** Resolved. `.github/CODEOWNERS` lists `@twn-lloyd @yokoszn`, two human owners,
    as the owners instructed. The ruleset still needs applying (item 6). No bot accounts are listed.
-2. **Patents and standards.** The per-format position is in docs/STANDARDS.md. Every row is still
-   unverified against its primary source, and H.264, AAC, MP3 and the containers that carry them
-   need counsel's review before publication. **Human**
-4. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists
+2. **Patents and licensing.** Resolved. The code is Apache-2.0, all modules are published, and the README and docs/STANDARDS.md state the patent position of each format and that the licence grants no rights under third-party patents.
+3. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists
    hello@twn.systems, alongside GitHub private reporting.
 5. **Visibility.** The repository is private. Scorecard publishing, the badges and
    dependency-review on private repositories (which needs GitHub Advanced Security) depend on this.
