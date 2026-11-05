@@ -48,10 +48,8 @@ been created or recorded here.
 
 1. **CODEOWNERS.** Resolved. `.github/CODEOWNERS` lists `@twn-lloyd @yokoszn`, two human owners,
    as the owners instructed. The ruleset still needs applying (item 6). No bot accounts are listed.
-2. **Patents and standards.** The per-format position is in docs/STANDARDS.md. Every row is still
-   unverified against its primary source, and H.264, AAC, MP3 and the containers that carry them
-   need counsel's review before publication. **Human**
-4. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists
+2. **Patents and licensing (open).** This section must be read before the crate is distributed. It is not resolved. Several formats in this crate are covered by patents in some jurisdictions. H.264 and AAC are the main examples, and both are licensed through patent pools. MP3 patents have largely expired, but the position varies by country. The MP4, MKV and HEIF writers carry H.264 here, so the same questions apply to their output. Container licensing has not been reviewed. AV1 is described by its licensors as royalty-free under published terms. That is not the same as a statement that no patent applies. Nothing in this repository is a patent search, a licensing opinion, or a grant of patent rights. Do not describe the crate as patent-free. Maintainers need to decide, with counsel, whether and how these codecs are published. That decision is tracked as an open item in docs/OPENSSF.md.
+3. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists
    hello@twn.systems, alongside GitHub private reporting.
 5. **Visibility.** The repository is private. Scorecard publishing, the badges and
    dependency-review on private repositories (which needs GitHub Advanced Security) depend on this.
