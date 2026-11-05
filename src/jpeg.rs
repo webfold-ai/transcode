@@ -540,6 +540,9 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
         }
         let marker = data[p + 1];
         p += 2;
+        if p + 2 > data.len() {
+            return Err("JPEG: truncated marker".into());
+        }
         match marker {
             0xD9 => return Err("JPEG: EOI before scan".into()),
             0xC0 | 0xC1 => {
@@ -690,6 +693,9 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 // APP14 Adobe: the transform byte (0 = CMYK/RGB, 1 = YCbCr, 2 = YCCK) — needed to
                 // colour-convert 4-component (CMYK) JPEGs, which Adobe also stores inverted.
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
+                if p + len > data.len() {
+                    return Err("JPEG: truncated APP14".into());
+                }
                 if len >= 14 && &data[p + 2..p + 7] == b"Adobe" {
                     adobe = Some(data[p + 13]);
                 }

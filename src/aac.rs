@@ -778,7 +778,11 @@ fn parse_raw_data_block(
                 // fill_element
                 let mut cnt = b.bits(4);
                 if cnt == 15 {
-                    cnt += b.bits(8) - 1;
+                    let esc = b.bits(8);
+                    if esc == 0 {
+                        return Err("AAC: fill element escape of zero".into());
+                    }
+                    cnt += esc - 1;
                 }
                 for _ in 0..cnt {
                     b.bits(8);

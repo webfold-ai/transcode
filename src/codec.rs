@@ -406,7 +406,10 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u8), String> {
     let ch = channels.max(1) as usize;
 
     let mut br = BitReader::new(&data[16..]);
-    let mut chans: Vec<Vec<i32>> = vec![Vec::with_capacity(frames); ch];
+    // Capacity only: a header frame count larger than the input can hold must not drive an
+    // allocation. The vectors still grow on demand, so valid output is unchanged.
+    let cap = frames.min(data.len().saturating_mul(8));
+    let mut chans: Vec<Vec<i32>> = vec![Vec::with_capacity(cap); ch];
     let mut got = 0;
     while got < frames {
         if br.bits(8) != SYNC {

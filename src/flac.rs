@@ -561,6 +561,9 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
         if last == 1 {
             break;
         }
+        if r.pos > data.len() * 8 {
+            return Err("FLAC: truncated metadata".into());
+        }
     }
     if rate == 0 || channels == 0 {
         return Err("missing STREAMINFO".into());
