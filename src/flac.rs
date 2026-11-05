@@ -456,11 +456,21 @@ fn read_utf8(r: &mut R) {
     }
 }
 
-fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Vec<i64> {
+fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Result<Vec<i64>, String> {
     let method = r.bits(2);
     let pbits = if method == 0 { 4 } else { 5 };
     let po = r.bits(4) as u32;
     let parts = 1usize << po;
+    // The partitions must divide the block exactly (the FLAC format requires it). Otherwise they sum to
+    // fewer samples than the subframe needs.
+    if blocksize % parts != 0 {
+        return Err("FLAC: block size is not divisible by the partition count".into());
+    }
+    // The first partition holds blocksize >> po samples minus the predictor order. A larger order is
+    // invalid, and it would underflow the count below.
+    if (blocksize >> po) < order {
+        return Err("FLAC: predictor order exceeds the partition size".into());
+    }
     let mut res = Vec::with_capacity(blocksize - order);
     for p in 0..parts {
         let cnt = if p == 0 {
@@ -484,7 +494,7 @@ fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Vec<i64> {
             }
         }
     }
-    res
+    Ok(res)
 }
 
 fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Result<Vec<i64>, String> {
@@ -506,17 +516,25 @@ fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Result<Vec<i64>, St
     } else if typ & 0b111000 == 0b001000 {
         let order = (typ & 0b111) as usize;
         let mut s: Vec<i64> = (0..order).map(|_| r.sbits(b)).collect();
-        let res = decode_residual(r, blocksize, order);
+        let res = decode_residual(r, blocksize, order)?;
         for i in 0..res.len() {
             let n = order + i;
+            // Wrapping: valid streams stay in range, and hostile input must not panic.
             let p = match order {
                 0 => 0,
                 1 => s[n - 1],
-                2 => 2 * s[n - 1] - s[n - 2],
-                3 => 3 * s[n - 1] - 3 * s[n - 2] + s[n - 3],
-                _ => 4 * s[n - 1] - 6 * s[n - 2] + 4 * s[n - 3] - s[n - 4],
+                2 => s[n - 1].wrapping_mul(2).wrapping_sub(s[n - 2]),
+                3 => s[n - 1]
+                    .wrapping_mul(3)
+                    .wrapping_sub(s[n - 2].wrapping_mul(3))
+                    .wrapping_add(s[n - 3]),
+                _ => s[n - 1]
+                    .wrapping_mul(4)
+                    .wrapping_sub(s[n - 2].wrapping_mul(6))
+                    .wrapping_add(s[n - 3].wrapping_mul(4))
+                    .wrapping_sub(s[n - 4]),
             };
-            s.push(res[i] + p);
+            s.push(res[i].wrapping_add(p));
         }
         s
     } else if typ & 0b100000 == 0b100000 {
@@ -525,14 +543,15 @@ fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Result<Vec<i64>, St
         let prec = (r.bits(4) as u32) + 1;
         let shift = r.bits(5) as i64;
         let coeffs: Vec<i64> = (0..order).map(|_| r.sbits(prec)).collect();
-        let res = decode_residual(r, blocksize, order);
+        let res = decode_residual(r, blocksize, order)?;
         for i in 0..res.len() {
             let n = order + i;
+            // Wrapping: valid streams never overflow i64 here, and hostile input must not panic.
             let mut p = 0i64;
             for j in 0..order {
-                p += coeffs[j] * s[n - 1 - j];
+                p = p.wrapping_add(coeffs[j].wrapping_mul(s[n - 1 - j]));
             }
-            s.push(res[i] + (p >> shift));
+            s.push(res[i].wrapping_add(p >> shift));
         }
         s
     } else {
