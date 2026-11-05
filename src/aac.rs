@@ -16,8 +16,9 @@
 use crate::aac_tables;
 
 /// ISO sampling-frequency table (index → Hz), 14496-3 Table 1.16.
-pub const SAMPLE_RATES: [u32; 13] =
-    [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+pub const SAMPLE_RATES: [u32; 13] = [
+    96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
+];
 
 /// channel_configuration → channel count (0 = defined by PCE; we treat as 0).
 pub const CHANNEL_CONFIG: [u16; 8] = [0, 1, 2, 3, 4, 5, 6, 8];
@@ -42,7 +43,11 @@ impl<'a> Bits<'a> {
         for _ in 0..n {
             let byte = self.pos >> 3;
             let bit = 7 - (self.pos & 7);
-            let b = if byte < self.data.len() { (self.data[byte] >> bit) & 1 } else { 0 };
+            let b = if byte < self.data.len() {
+                (self.data[byte] >> bit) & 1
+            } else {
+                0
+            };
             v = (v << 1) | b as u32;
             self.pos += 1;
         }
@@ -63,14 +68,14 @@ impl<'a> Bits<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct AdtsHeader {
-    pub mpeg4: bool,           // ID bit: false = MPEG-4, true = MPEG-2
+    pub mpeg4: bool, // ID bit: false = MPEG-4, true = MPEG-2
     pub protection_absent: bool,
-    pub profile: u8,           // object_type - 1  (LC = 1)
+    pub profile: u8, // object_type - 1  (LC = 1)
     pub sf_index: u8,
     pub channel_config: u8,
-    pub frame_length: usize,   // total frame incl. header, bytes
-    pub num_blocks: u8,        // raw_data_blocks in frame - 1
-    pub header_len: usize,     // 7 (no CRC) or 9 (CRC)
+    pub frame_length: usize, // total frame incl. header, bytes
+    pub num_blocks: u8,      // raw_data_blocks in frame - 1
+    pub header_len: usize,   // 7 (no CRC) or 9 (CRC)
 }
 
 /// Parse an ADTS header at byte offset `o`. Returns None if no valid syncword.
@@ -250,7 +255,11 @@ pub fn huffman_selftest() -> i32 {
             "  cb{cb:<2} {:>3} symbols, max {} bits  {}",
             codes.len(),
             lens.iter().max().unwrap(),
-            if bad == 0 { "[ok]".to_string() } else { format!("[{bad} BAD]") }
+            if bad == 0 {
+                "[ok]".to_string()
+            } else {
+                format!("[{bad} BAD]")
+            }
         );
     }
     let (sfc, sfl) = (&aac_tables::SF_CODES, &aac_tables::SF_BITS);
@@ -263,7 +272,11 @@ pub fn huffman_selftest() -> i32 {
         "  sf  {:>3} symbols, max {} bits  {}",
         sfc.len(),
         sfl.iter().max().unwrap(),
-        if bad == 0 { "[ok]".to_string() } else { format!("[{bad} BAD]") }
+        if bad == 0 {
+            "[ok]".to_string()
+        } else {
+            format!("[{bad} BAD]")
+        }
     );
     if fails == 0 {
         println!("aac huffman: all {total} codewords round-trip (valid prefix codes)");
@@ -292,8 +305,8 @@ pub struct Ics {
     pub max_sfb: usize,
     pub num_windows: usize,
     pub num_window_groups: usize,
-    pub group_len: Vec<usize>,    // windows per group
-    pub swb_offset: Vec<usize>,   // sfb boundaries within one window
+    pub group_len: Vec<usize>,  // windows per group
+    pub swb_offset: Vec<usize>, // sfb boundaries within one window
     pub num_swb: usize,
 }
 
@@ -324,7 +337,11 @@ fn decode_ics_info(b: &mut Bits, sr: usize) -> Result<Ics, String> {
     b.bit(); // ics_reserved_bit
     let window_sequence = b.bits(2);
     let window_shape = b.bit();
-    let mut ics = Ics { window_sequence, window_shape, ..Default::default() };
+    let mut ics = Ics {
+        window_sequence,
+        window_shape,
+        ..Default::default()
+    };
     if window_sequence == EIGHT_SHORT {
         ics.max_sfb = b.bits(4) as usize;
         let sfg = b.bits(7);
@@ -361,7 +378,11 @@ fn decode_ics_info(b: &mut Bits, sr: usize) -> Result<Ics, String> {
 }
 
 fn decode_section(b: &mut Bits, ics: &Ics) -> Vec<u8> {
-    let bits_incr = if ics.window_sequence == EIGHT_SHORT { 3 } else { 5 };
+    let bits_incr = if ics.window_sequence == EIGHT_SHORT {
+        3
+    } else {
+        5
+    };
     let esc = (1u32 << bits_incr) - 1;
     let mut cb = vec![0u8; ics.num_window_groups * ics.max_sfb];
     for g in 0..ics.num_window_groups {
@@ -390,7 +411,12 @@ fn decode_section(b: &mut Bits, ics: &Ics) -> Vec<u8> {
     cb
 }
 
-fn decode_scalefactors(b: &mut Bits, ics: &Ics, cb: &[u8], global_gain: u32) -> Result<Vec<i32>, String> {
+fn decode_scalefactors(
+    b: &mut Bits,
+    ics: &Ics,
+    cb: &[u8],
+    global_gain: u32,
+) -> Result<Vec<i32>, String> {
     let mut sf = vec![0i32; ics.num_window_groups * ics.max_sfb];
     let mut off_sf = global_gain as i32;
     let mut off_is = 0i32;
@@ -535,7 +561,9 @@ fn decode_tns(b: &mut Bits, ics: &Ics) -> Tns {
     } else {
         (2, 6, 5)
     };
-    let mut tns = Tns { filt: vec![Vec::new(); ics.num_windows] };
+    let mut tns = Tns {
+        filt: vec![Vec::new(); ics.num_windows],
+    };
     for w in 0..ics.num_windows {
         let n_filt = b.bits(nf_bits);
         if n_filt > 0 {
@@ -544,7 +572,11 @@ fn decode_tns(b: &mut Bits, ics: &Ics) -> Tns {
             for _ in 0..n_filt {
                 let length = b.bits(len_bits) as usize;
                 let order = b.bits(ord_bits) as usize;
-                let mut f = TnsFilter { length, order, ..Default::default() };
+                let mut f = TnsFilter {
+                    length,
+                    order,
+                    ..Default::default()
+                };
                 if order > 0 {
                     f.direction = b.bit() == 1;
                     let coef_compress = b.bit();
@@ -554,7 +586,11 @@ fn decode_tns(b: &mut Bits, ics: &Ics) -> Tns {
                     let iqfac_m = ((1i32 << (coef_res_bits - 1)) as f64 + 0.5) / (PI / 2.0);
                     for _ in 0..order {
                         let raw = b.bits(coef_bits) as i32;
-                        let c = if raw >= (1 << (coef_bits - 1)) { raw - (1 << coef_bits) } else { raw };
+                        let c = if raw >= (1 << (coef_bits - 1)) {
+                            raw - (1 << coef_bits)
+                        } else {
+                            raw
+                        };
                         let p = (c as f64 / if c >= 0 { iqfac } else { iqfac_m }).sin();
                         f.parcor.push(p);
                     }
@@ -596,9 +632,16 @@ fn apply_tns(spec: &mut [f64], ics: &Ics, tns: &Tns) {
             if size == 0 {
                 continue;
             }
-            let woff = if ics.window_sequence == EIGHT_SHORT { w * 128 } else { 0 };
-            let (mut p, inc): (isize, isize) =
-                if f.direction { ((woff + end - 1) as isize, -1) } else { ((woff + start) as isize, 1) };
+            let woff = if ics.window_sequence == EIGHT_SHORT {
+                w * 128
+            } else {
+                0
+            };
+            let (mut p, inc): (isize, isize) = if f.direction {
+                ((woff + end - 1) as isize, -1)
+            } else {
+                ((woff + start) as isize, 1)
+            };
             for m in 0..size {
                 let lim = m.min(order);
                 let mut acc = spec[p as usize];
@@ -644,7 +687,11 @@ fn parse_ics(b: &mut Bits, sr: usize, common: Option<&Ics>, dbg: bool) -> Result
     if dbg {
         eprintln!("  after pulse @bit {}", b.pos);
     }
-    let tns = if b.bit() == 1 { decode_tns(b, &ics) } else { Tns::default() };
+    let tns = if b.bit() == 1 {
+        decode_tns(b, &ics)
+    } else {
+        Tns::default()
+    };
     if dbg {
         eprintln!("  after tns @bit {}", b.pos);
     }
@@ -655,12 +702,24 @@ fn parse_ics(b: &mut Bits, sr: usize, common: Option<&Ics>, dbg: bool) -> Result
     if dbg {
         eprintln!("  after spectral @bit {}  ncoef={}", b.pos, coef.len());
     }
-    Ok(Channel { ics, global_gain, cb, sf, coef, tns })
+    Ok(Channel {
+        ics,
+        global_gain,
+        cb,
+        sf,
+        coef,
+        tns,
+    })
 }
 
 /// Parse one raw_data_block: the element sequence terminated by ID_END.
 /// `ms` collects (num_groups, max_sfb, ms_used bits) per CPE for stereo.
-fn parse_raw_data_block(b: &mut Bits, sr: usize, ms: &mut Vec<Vec<bool>>, dbg: bool) -> Result<Vec<Channel>, String> {
+fn parse_raw_data_block(
+    b: &mut Bits,
+    sr: usize,
+    ms: &mut Vec<Vec<bool>>,
+    dbg: bool,
+) -> Result<Vec<Channel>, String> {
     let mut chans = Vec::new();
     loop {
         let id = b.bits(3);
@@ -719,7 +778,11 @@ fn parse_raw_data_block(b: &mut Bits, sr: usize, ms: &mut Vec<Vec<bool>>, dbg: b
                 // fill_element
                 let mut cnt = b.bits(4);
                 if cnt == 15 {
-                    cnt += b.bits(8) - 1;
+                    let esc = b.bits(8);
+                    if esc == 0 {
+                        return Err("AAC: fill element escape of zero".into());
+                    }
+                    cnt += esc - 1;
                 }
                 for _ in 0..cnt {
                     b.bits(8);
@@ -787,7 +850,9 @@ pub fn align_check(data: &[u8]) -> Result<String, String> {
     } else {
         format!("; first mismatch — {first_err}")
     };
-    Ok(format!("{aligned}/{frames} frames byte-exact aligned ({errs} mismatched){tail}"))
+    Ok(format!(
+        "{aligned}/{frames} frames byte-exact aligned ({errs} mismatched){tail}"
+    ))
 }
 
 /// Count feature usage across the stream (to characterize decode residuals).
@@ -842,7 +907,12 @@ pub fn debug_frame(data: &[u8]) -> Result<String, String> {
     let mut b = Bits::at(data, h.header_len * 8);
     let mut ms = Vec::new();
     let r = parse_raw_data_block(&mut b, h.sf_index as usize, &mut ms, true);
-    Ok(format!("result={:?}  ended @bit {} (want {})", r.map(|c| c.len()), b.pos, frame_end))
+    Ok(format!(
+        "result={:?}  ended @bit {} (want {})",
+        r.map(|c| c.len()),
+        b.pos,
+        frame_end
+    ))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -902,7 +972,9 @@ pub fn kbd_window(n: usize, alpha: f64) -> Vec<f64> {
 
 /// Sine window of length `n`: W[k] = sin( π/N (k + 1/2) ).
 pub fn sine_window(n: usize) -> Vec<f64> {
-    (0..n).map(|k| (PI / n as f64 * (k as f64 + 0.5)).sin()).collect()
+    (0..n)
+        .map(|k| (PI / n as f64 * (k as f64 + 0.5)).sin())
+        .collect()
 }
 
 /// In-place radix-2 FFT, positive sign, no normalization:
@@ -975,7 +1047,10 @@ fn mdct_twiddles(n: usize) -> &'static Twiddles {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<usize, &'static Twiddles>>> = OnceLock::new();
-    let mut map = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+    let mut map = CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
     if let Some(t) = map.get(&n) {
         return t;
     }
@@ -1003,7 +1078,14 @@ fn mdct_twiddles(n: usize) -> &'static Twiddles {
         p_im[nn] = i;
     }
     let leaked: &'static Twiddles = Box::leak(Box::new(Twiddles {
-        b_re, b_im, a_re, a_im, p_re, p_im, wp_re, wp_im,
+        b_re,
+        b_im,
+        a_re,
+        a_im,
+        p_re,
+        p_im,
+        wp_re,
+        wp_im,
     }));
     map.insert(n, leaked);
     leaked
@@ -1021,7 +1103,9 @@ fn fast_imdct_core(spec: &[f64]) -> Vec<f64> {
         yi[k] = spec[k] * tw.b_im[k];
     }
     fft_pos(&mut yr, &mut yi);
-    (0..n).map(|nn| tw.a_re[nn] * yr[nn] - tw.a_im[nn] * yi[nn]).collect()
+    (0..n)
+        .map(|nn| tw.a_re[nn] * yr[nn] - tw.a_im[nn] * yi[nn])
+        .collect()
 }
 
 /// Forward MDCT cosine sum (length N → M), canonical phase, via one N-point FFT.
@@ -1035,7 +1119,9 @@ fn fast_mdct_core(time: &[f64]) -> Vec<f64> {
         zi[nn] = time[nn] * tw.p_im[nn];
     }
     fft_pos(&mut zr, &mut zi);
-    (0..m).map(|k| tw.wp_re[k] * zr[k] - tw.wp_im[k] * zi[k]).collect()
+    (0..m)
+        .map(|k| tw.wp_re[k] * zr[k] - tw.wp_im[k] * zi[k])
+        .collect()
 }
 
 #[inline]
@@ -1111,7 +1197,11 @@ pub fn mdct_probe() -> i32 {
         ((n / 2 + 1) as f64 / 2.0, "(N/2+1)/2=same"),
         ((n as f64) / 2.0 + 0.5, "N/2+0.5"),
     ];
-    let candidates_scale = [(2.0 / n as f64, "2/N"), (2.0 / half as f64, "2/L=4/N"), (1.0 / half as f64, "1/L")];
+    let candidates_scale = [
+        (2.0 / n as f64, "2/N"),
+        (2.0 / half as f64, "2/L=4/N"),
+        (1.0 / half as f64, "1/L"),
+    ];
     for (n0, n0name) in candidates_n0 {
         for (scale, sname) in candidates_scale {
             let mut recon = vec![0.0f64; total];
@@ -1125,7 +1215,9 @@ pub fn mdct_probe() -> i32 {
                 }
                 h += half;
             }
-            let err = (n..total - n).map(|i| (recon[i] - sig[i]).abs()).fold(0.0, f64::max);
+            let err = (n..total - n)
+                .map(|i| (recon[i] - sig[i]).abs())
+                .fold(0.0, f64::max);
             let db = 20.0 * err.max(1e-300).log10();
             println!("  n0={n0name:<14} scale={sname:<8} → {db:>8.1} dB");
         }
@@ -1156,7 +1248,11 @@ pub fn fft_check() -> i32 {
         let mut di = 0.0f64;
         for nn in 0..n {
             let a = nn as f64 + n0;
-            let naive: f64 = spec.iter().enumerate().map(|(k, &s)| s * (PI / m as f64 * a * (k as f64 + 0.5)).cos()).sum();
+            let naive: f64 = spec
+                .iter()
+                .enumerate()
+                .map(|(k, &s)| s * (PI / m as f64 * a * (k as f64 + 0.5)).cos())
+                .sum();
             di = di.max((fast[nn] - naive).abs());
         }
         // MDCT: fast core vs direct cosine sum
@@ -1164,12 +1260,20 @@ pub fn fft_check() -> i32 {
         let fastf = fast_mdct_core(&time);
         let mut df = 0.0f64;
         for k in 0..m {
-            let naive: f64 = time.iter().enumerate().map(|(nn, &t)| t * (PI / m as f64 * (nn as f64 + n0) * (k as f64 + 0.5)).cos()).sum();
+            let naive: f64 = time
+                .iter()
+                .enumerate()
+                .map(|(nn, &t)| t * (PI / m as f64 * (nn as f64 + n0) * (k as f64 + 0.5)).cos())
+                .sum();
             df = df.max((fastf[k] - naive).abs());
         }
         worst = worst.max(di).max(df);
         let to_db = |e: f64| 20.0 * e.max(1e-300).log10();
-        println!("  N={n:<5} IMDCT err {di:.2e} ({:>7.1} dB)   MDCT err {df:.2e} ({:>7.1} dB)", to_db(di), to_db(df));
+        println!(
+            "  N={n:<5} IMDCT err {di:.2e} ({:>7.1} dB)   MDCT err {df:.2e} ({:>7.1} dB)",
+            to_db(di),
+            to_db(df)
+        );
     }
     if worst < 1e-6 {
         println!("aac FFT cores: match direct cosine sum (worst {worst:.2e}) [ok]");
@@ -1186,7 +1290,9 @@ pub fn imdct_bench() -> i32 {
     use std::time::Instant;
     let spec: Vec<f64> = (0..1024).map(|k| (k as f64 * 0.0173).sin()).collect();
     // warm
-    for _ in 0..1000 { let _ = fast_imdct_core(&spec); }
+    for _ in 0..1000 {
+        let _ = fast_imdct_core(&spec);
+    }
     let iters = 100_000usize;
     let t0 = Instant::now();
     let mut sink = 0.0f64;
@@ -1197,13 +1303,15 @@ pub fn imdct_bench() -> i32 {
     let dt = t0.elapsed().as_secs_f64();
     let us = dt * 1e6 / iters as f64;
     let mhz = (1024.0 / us) as i64; // Msamp/s of spec consumed
-    // For 10s @16k decode budget context (1024-hop): 160000/1024 ≈ 156 frames.
+                                    // For 10s @16k decode budget context (1024-hop): 160000/1024 ≈ 156 frames.
     let frames_10s = 156.0;
     let imdct_share_ms = us * frames_10s / 1000.0;
     println!("fast_imdct_core(spec[1024]): {us:.2} µs/call  ({mhz} Msamp/s)  [sink={sink:.3e}]");
     println!("for 10s @16k mono (156 long frames): IMDCT alone = {imdct_share_ms:.2} ms");
-    println!("(compare to measured full decode 26.89 ms → IMDCT is ~{:.0}% of decode)",
-             100.0 * imdct_share_ms / 26.89);
+    println!(
+        "(compare to measured full decode 26.89 ms → IMDCT is ~{:.0}% of decode)",
+        100.0 * imdct_share_ms / 26.89
+    );
     0
 }
 
@@ -1290,7 +1398,11 @@ fn dequant_table() -> &'static [f64; 8192] {
 #[inline]
 fn dequant(q: i32) -> f64 {
     let a = dequant_table()[(q.unsigned_abs() as usize).min(8191)];
-    if q < 0 { -a } else { a }
+    if q < 0 {
+        -a
+    } else {
+        a
+    }
 }
 
 /// Precomputed analysis windows (sine + KBD, long + short).
@@ -1319,7 +1431,10 @@ struct ChanState {
 }
 impl Default for ChanState {
     fn default() -> Self {
-        ChanState { overlap: [0.0; 1024], prev_kbd: false }
+        ChanState {
+            overlap: [0.0; 1024],
+            prev_kbd: false,
+        }
     }
 }
 
@@ -1341,7 +1456,11 @@ fn reconstruct(ch: &Channel) -> Vec<f64> {
             let gain = 2f64.powf(0.25 * (sf - 100) as f64);
             let off = ics.swb_offset[s];
             for w in 0..ics.group_len[g] {
-                let base = if ics.window_sequence == EIGHT_SHORT { (win_start + w) * 128 } else { 0 };
+                let base = if ics.window_sequence == EIGHT_SHORT {
+                    (win_start + w) * 128
+                } else {
+                    0
+                };
                 for k in 0..width {
                     let q = ch.coef[ci];
                     ci += 1;
@@ -1369,7 +1488,11 @@ fn apply_ms(ics: &Ics, ms_used: &[bool], spectra: &mut [Vec<f64>]) {
             let off = ics.swb_offset[s];
             let width = ics.swb_offset[s + 1] - off;
             for w in 0..ics.group_len[g] {
-                let base = if ics.window_sequence == EIGHT_SHORT { (win_start + w) * 128 } else { 0 };
+                let base = if ics.window_sequence == EIGHT_SHORT {
+                    (win_start + w) * 128
+                } else {
+                    0
+                };
                 for k in 0..width {
                     let p = base + off + k;
                     let (m, sd) = (s0[p], s1[p]);
@@ -1384,10 +1507,26 @@ fn apply_ms(ics: &Ics, ms_used: &[bool], spectra: &mut [Vec<f64>]) {
 /// Build the 2048-point synthesis window for a long-type block, honouring the
 /// window_sequence transitions (START/STOP) and per-half window shape.
 fn make_long_window(ws: u32, prev_kbd: bool, curr_kbd: bool, dsp: &Dsp) -> Vec<f64> {
-    let ll = if prev_kbd { &dsp.kbd_long } else { &dsp.sine_long };
-    let lr = if curr_kbd { &dsp.kbd_long } else { &dsp.sine_long };
-    let sl = if prev_kbd { &dsp.kbd_short } else { &dsp.sine_short };
-    let sr = if curr_kbd { &dsp.kbd_short } else { &dsp.sine_short };
+    let ll = if prev_kbd {
+        &dsp.kbd_long
+    } else {
+        &dsp.sine_long
+    };
+    let lr = if curr_kbd {
+        &dsp.kbd_long
+    } else {
+        &dsp.sine_long
+    };
+    let sl = if prev_kbd {
+        &dsp.kbd_short
+    } else {
+        &dsp.sine_short
+    };
+    let sr = if curr_kbd {
+        &dsp.kbd_short
+    } else {
+        &dsp.sine_short
+    };
     let mut w = vec![0f64; 2048];
     match ws {
         EIGHT_SHORT => {} // handled separately
@@ -1422,7 +1561,11 @@ fn make_long_window(ws: u32, prev_kbd: bool, curr_kbd: bool, dsp: &Dsp) -> Vec<f
 fn synth(ws: u32, curr_kbd: bool, spec: &[f64], st: &mut ChanState, dsp: &Dsp) -> Vec<f64> {
     let mut buf = vec![0f64; 2048];
     if ws == EIGHT_SHORT {
-        let sw = if curr_kbd { &dsp.kbd_short } else { &dsp.sine_short };
+        let sw = if curr_kbd {
+            &dsp.kbd_short
+        } else {
+            &dsp.sine_short
+        };
         for i in 0..8 {
             let t = imdct(&spec[i * 128..i * 128 + 128]);
             for j in 0..256 {
@@ -1483,7 +1626,10 @@ pub fn synth_pr_test() -> i32 {
         sigp += (g * sig[i]).powi(2);
     }
     let db = 10.0 * (err / sigp).max(1e-300).log10();
-    println!("decode-path gain G={g:.4}  (1/G={:.4})  residual={db:.1} dB", 1.0 / g);
+    println!(
+        "decode-path gain G={g:.4}  (1/G={:.4})  residual={db:.1} dB",
+        1.0 / g
+    );
     if db < -60.0 {
         println!("OLA reconstructs cleanly; divide synth by G to match unity");
         0
@@ -1563,7 +1709,10 @@ struct BitWriter {
 }
 impl BitWriter {
     fn new() -> Self {
-        BitWriter { buf: Vec::new(), nbits: 0 }
+        BitWriter {
+            buf: Vec::new(),
+            nbits: 0,
+        }
     }
     fn write(&mut self, n: u32, val: u32) {
         for k in (0..n).rev() {
@@ -1600,18 +1749,28 @@ fn quant(x: f64, sf: i32) -> i32 {
     let g = 2f64.powf(-0.25 * (sf - 100) as f64);
     let m = ((x.abs() * g).powf(0.75) + 0.4054) as i32;
     let q = m.min(8191);
-    if x < 0.0 { -q } else { q }
+    if x < 0.0 {
+        -q
+    } else {
+        q
+    }
 }
 
 /// Codebook index for a `dim`-value tuple (signed cbs use values; unsigned use
 /// magnitudes; cb11 clamps magnitude to 16 = ESC flag).
 fn cb_index(cb: usize, t: &[i32]) -> usize {
     match cb {
-        1 | 2 => t.iter().fold(0, |a, &v| a * 3 + (v.clamp(-1, 1) + 1) as usize),
-        3 | 4 => t.iter().fold(0, |a, &v| a * 3 + (v.unsigned_abs() as usize).min(2)),
+        1 | 2 => t
+            .iter()
+            .fold(0, |a, &v| a * 3 + (v.clamp(-1, 1) + 1) as usize),
+        3 | 4 => t
+            .iter()
+            .fold(0, |a, &v| a * 3 + (v.unsigned_abs() as usize).min(2)),
         5 | 6 => (t[0].clamp(-4, 4) + 4) as usize * 9 + (t[1].clamp(-4, 4) + 4) as usize,
         7 | 8 => (t[0].unsigned_abs() as usize).min(7) * 8 + (t[1].unsigned_abs() as usize).min(7),
-        9 | 10 => (t[0].unsigned_abs() as usize).min(12) * 13 + (t[1].unsigned_abs() as usize).min(12),
+        9 | 10 => {
+            (t[0].unsigned_abs() as usize).min(12) * 13 + (t[1].unsigned_abs() as usize).min(12)
+        }
         11 => (t[0].unsigned_abs() as usize).min(16) * 17 + (t[1].unsigned_abs() as usize).min(16),
         _ => 0,
     }
@@ -1742,13 +1901,13 @@ fn build_ics(spec: &[f64], swb: &[usize], sf: i32) -> BitWriter {
     }
     let mut w = BitWriter::new();
     w.write(8, sf as u32 & 0xFF); // global_gain
-    // ics_info (ONLY_LONG, sine window)
+                                  // ics_info (ONLY_LONG, sine window)
     w.write(1, 0); // ics_reserved_bit
     w.write(2, 0); // window_sequence = ONLY_LONG
     w.write(1, 0); // window_shape = sine
     w.write(6, max_sfb as u32);
     w.write(1, 0); // predictor_data_present
-    // section_data: runs of equal codebook
+                   // section_data: runs of equal codebook
     let mut s = 0;
     while s < max_sfb {
         let c = cbs[s];
@@ -1774,7 +1933,7 @@ fn build_ics(spec: &[f64], swb: &[usize], sf: i32) -> BitWriter {
     w.write(1, 0); // pulse_data_present
     w.write(1, 0); // tns_data_present
     w.write(1, 0); // gain_control_data_present
-    // spectral_data
+                   // spectral_data
     for s in 0..max_sfb {
         let c = cbs[s] as usize;
         if c == 0 || c >= 12 {
@@ -1831,7 +1990,10 @@ fn encode_channel(spec: &[f64], swb: &[usize], target_bits: usize) -> BitWriter 
         return ics0; // finest allowed sf already fits — nothing to coarsen
     }
     let n_coef = swb[swb.len() - 1];
-    let n_nz = spec[..n_coef].iter().filter(|&&x| quant(x, sf_min) != 0).count();
+    let n_nz = spec[..n_coef]
+        .iter()
+        .filter(|&&x| quant(x, sf_min) != 0)
+        .count();
     let slope = (0.1875 * n_nz as f64).max(1e-6); // bits shed per +1 in sf
     let step = ((ics0.len_bits() - target_bits) as f64 / slope).ceil() as i32;
     let sf = (sf_min + step).clamp(sf_min, 255);
@@ -1885,7 +2047,10 @@ pub fn encode_roundtrip_test() -> i32 {
             }
         }
     }
-    println!("aac encode round-trip (1 kHz tone @128k): correlation={best:.4}  ({} B)", aac.len());
+    println!(
+        "aac encode round-trip (1 kHz tone @128k): correlation={best:.4}  ({} B)",
+        aac.len()
+    );
     if best > 0.99 {
         println!("  encoder OK");
         0
@@ -1898,7 +2063,10 @@ pub fn encode_roundtrip_test() -> i32 {
 /// Encode interleaved 16-bit PCM to an ADTS AAC-LC stream at ~`bitrate_kbps`.
 pub fn encode_pcm(samples: &[i16], rate: u32, channels: u16, bitrate_kbps: u32) -> Vec<u8> {
     let sr_index = SAMPLE_RATES.iter().position(|&r| r == rate).unwrap_or(4);
-    let swb: Vec<usize> = aac_tables::swb_offset_long(sr_index).iter().map(|&x| x as usize).collect();
+    let swb: Vec<usize> = aac_tables::swb_offset_long(sr_index)
+        .iter()
+        .map(|&x| x as usize)
+        .collect();
     let nch = channels.max(1) as usize;
     let n_in = samples.len() / nch;
     let awin = sine_window(2048);

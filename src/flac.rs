@@ -13,7 +13,11 @@ fn crc8(d: &[u8]) -> u8 {
     for &b in d {
         c ^= b;
         for _ in 0..8 {
-            c = if c & 0x80 != 0 { (c << 1) ^ 0x07 } else { c << 1 };
+            c = if c & 0x80 != 0 {
+                (c << 1) ^ 0x07
+            } else {
+                c << 1
+            };
         }
     }
     c
@@ -23,7 +27,11 @@ fn crc16(d: &[u8]) -> u16 {
     for &b in d {
         c ^= (b as u16) << 8;
         for _ in 0..8 {
-            c = if c & 0x8000 != 0 { (c << 1) ^ 0x8005 } else { c << 1 };
+            c = if c & 0x8000 != 0 {
+                (c << 1) ^ 0x8005
+            } else {
+                c << 1
+            };
         }
     }
     c
@@ -37,7 +45,11 @@ struct W {
 }
 impl W {
     fn new() -> Self {
-        W { buf: Vec::new(), acc: 0, n: 0 }
+        W {
+            buf: Vec::new(),
+            acc: 0,
+            n: 0,
+        }
     }
     fn bits(&mut self, v: u64, nb: u32) {
         for i in (0..nb).rev() {
@@ -63,8 +75,19 @@ fn write_utf8(w: &mut W, val: u64) {
         w.bits(val, 8);
         return;
     }
-    let nb = if val < 0x800 { 2 } else if val < 0x10000 { 3 } else if val < 0x200000 { 4 }
-        else if val < 0x4000000 { 5 } else if val < 0x80000000 { 6 } else { 7u32 };
+    let nb = if val < 0x800 {
+        2
+    } else if val < 0x10000 {
+        3
+    } else if val < 0x200000 {
+        4
+    } else if val < 0x4000000 {
+        5
+    } else if val < 0x80000000 {
+        6
+    } else {
+        7u32
+    };
     let lead = ((0xFFu32 << (8 - nb)) & 0xFF) as u64 | (val >> (6 * (nb - 1)));
     w.bits(lead, 8);
     for i in (0..nb - 1).rev() {
@@ -90,8 +113,16 @@ fn choose_k(res: &[i64]) -> u32 {
     if res.is_empty() {
         return 0;
     }
-    let mean = res.iter().map(|&r| ((r << 1) ^ (r >> 63)) as u128).sum::<u128>() / res.len() as u128;
-    let k = if mean == 0 { 0 } else { 63 - (mean as u64).leading_zeros() };
+    let mean = res
+        .iter()
+        .map(|&r| ((r << 1) ^ (r >> 63)) as u128)
+        .sum::<u128>()
+        / res.len() as u128;
+    let k = if mean == 0 {
+        0
+    } else {
+        63 - (mean as u64).leading_zeros()
+    };
     k.min(30)
 }
 
@@ -125,11 +156,21 @@ fn write_residual(w: &mut W, res: &[i64]) {
 fn autocorr(x: &[i64], lag: usize) -> Vec<f64> {
     let n = x.len();
     let half = (n as f64 - 1.0) / 2.0;
-    let w: Vec<f64> = x.iter().enumerate().map(|(i, &v)| {
-        let t = if half > 0.0 { (i as f64 - half) / half } else { 0.0 };
-        v as f64 * (1.0 - t * t)
-    }).collect();
-    (0..=lag).map(|k| (k..n).map(|i| w[i] * w[i - k]).sum()).collect()
+    let w: Vec<f64> = x
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            let t = if half > 0.0 {
+                (i as f64 - half) / half
+            } else {
+                0.0
+            };
+            v as f64 * (1.0 - t * t)
+        })
+        .collect();
+    (0..=lag)
+        .map(|k| (k..n).map(|i| w[i] * w[i - k]).sum())
+        .collect()
 }
 
 fn levinson(r: &[f64], order: usize) -> Vec<f64> {
@@ -140,14 +181,20 @@ fn levinson(r: &[f64], order: usize) -> Vec<f64> {
     }
     for i in 0..order {
         let mut acc = r[i + 1];
-        for j in 0..i { acc -= a[j] * r[i - j]; }
+        for j in 0..i {
+            acc -= a[j] * r[i - j];
+        }
         let k = acc / e;
         let mut na = a.clone();
         na[i] = k;
-        for j in 0..i { na[j] = a[j] - k * a[i - 1 - j]; }
+        for j in 0..i {
+            na[j] = a[j] - k * a[i - 1 - j];
+        }
         a = na;
         e *= 1.0 - k * k;
-        if e <= 0.0 { break; }
+        if e <= 0.0 {
+            break;
+        }
     }
     a
 }
@@ -177,7 +224,11 @@ fn write_lpc(w: &mut W, x: &[i64], bps: u32, order: usize) {
     w.bits(0, 1);
     w.bits(0b100000 | (order - 1) as u64, 6); // LPC subframe, order
     w.bits(0, 1); // no wasted bits
-    let mask = if bps >= 64 { u64::MAX } else { (1u64 << bps) - 1 };
+    let mask = if bps >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bps) - 1
+    };
     for &s in &x[..order] {
         w.bits((s as u64) & mask, bps);
     }
@@ -187,11 +238,15 @@ fn write_lpc(w: &mut W, x: &[i64], bps: u32, order: usize) {
     for &qc in &q {
         w.bits((qc as u64) & cmask, LPC_PREC);
     }
-    let res: Vec<i64> = (order..x.len()).map(|n| {
-        let mut p = 0i64;
-        for j in 0..order { p += q[j] as i64 * x[n - 1 - j]; }
-        x[n] - (p >> shift)
-    }).collect();
+    let res: Vec<i64> = (order..x.len())
+        .map(|n| {
+            let mut p = 0i64;
+            for j in 0..order {
+                p += q[j] as i64 * x[n - 1 - j];
+            }
+            x[n] - (p >> shift)
+        })
+        .collect();
     write_residual(w, &res);
 }
 
@@ -200,14 +255,24 @@ fn write_fixed(w: &mut W, x: &[i64], bps: u32) {
     let mut best = 0usize;
     let mut best_sum = u128::MAX;
     for o in 0..=4.min(x.len().saturating_sub(1)) {
-        let s: u128 = residual_fixed(x, o).iter().map(|&r| r.unsigned_abs() as u128).sum();
-        if s < best_sum { best_sum = s; best = o; }
+        let s: u128 = residual_fixed(x, o)
+            .iter()
+            .map(|&r| r.unsigned_abs() as u128)
+            .sum();
+        if s < best_sum {
+            best_sum = s;
+            best = o;
+        }
     }
     let order = best;
     w.bits(0, 1);
     w.bits(0b001000 | order as u64, 6);
     w.bits(0, 1);
-    let mask = if bps >= 64 { u64::MAX } else { (1u64 << bps) - 1 };
+    let mask = if bps >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bps) - 1
+    };
     for &s in &x[..order] {
         w.bits((s as u64) & mask, bps);
     }
@@ -216,7 +281,11 @@ fn write_fixed(w: &mut W, x: &[i64], bps: u32) {
 
 /// Pick subframe type: CONSTANT for flat blocks, LPC for normal, FIXED for tiny. -/
 fn write_subframe(w: &mut W, x: &[i64], bps: u32) {
-    let mask = if bps >= 64 { u64::MAX } else { (1u64 << bps) - 1 };
+    let mask = if bps >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bps) - 1
+    };
     if x.iter().all(|&v| v == x[0]) {
         w.bits(0, 1);
         w.bits(0, 6); // CONSTANT
@@ -331,36 +400,60 @@ impl<'a> R<'a> {
     fn bit(&mut self) -> u64 {
         let (byte, off) = (self.pos / 8, 7 - (self.pos % 8));
         self.pos += 1;
-        if byte < self.d.len() { ((self.d[byte] >> off) & 1) as u64 } else { 0 }
+        if byte < self.d.len() {
+            ((self.d[byte] >> off) & 1) as u64
+        } else {
+            0
+        }
     }
     fn bits(&mut self, n: u32) -> u64 {
         let mut v = 0u64;
-        for _ in 0..n { v = (v << 1) | self.bit(); }
+        for _ in 0..n {
+            v = (v << 1) | self.bit();
+        }
         v
     }
     fn sbits(&mut self, n: u32) -> i64 {
-        if n == 0 { return 0; }
+        if n == 0 {
+            return 0;
+        }
         let v = self.bits(n);
         let sh = 64 - n;
         ((v << sh) as i64) >> sh
     }
     fn unary(&mut self) -> u32 {
         let mut q = 0u32;
-        while self.bit() == 0 { q += 1; }
+        // Past the end of the input the reader yields zeros forever. Stop once the read position
+        // is past the end, so a truncated stream cannot loop; the caller's sync checks reject it.
+        while self.bit() == 0 {
+            if self.pos > self.d.len() * 8 {
+                break;
+            }
+            q += 1;
+        }
         q
     }
     fn align(&mut self) {
-        if self.pos % 8 != 0 { self.pos += 8 - (self.pos % 8); }
+        if self.pos % 8 != 0 {
+            self.pos += 8 - (self.pos % 8);
+        }
     }
 }
 
 fn read_utf8(r: &mut R) {
     let b0 = r.bits(8);
-    if b0 < 0x80 { return; }
+    if b0 < 0x80 {
+        return;
+    }
     let mut nc = 0u32;
     let mut m = 0x40u64;
-    while b0 & m != 0 { nc += 1; m >>= 1; }
-    for _ in 0..nc { r.bits(8); }
+    while b0 & m != 0 {
+        nc += 1;
+        m >>= 1;
+    }
+    for _ in 0..nc {
+        r.bits(8);
+    }
 }
 
 fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Vec<i64> {
@@ -370,12 +463,18 @@ fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Vec<i64> {
     let parts = 1usize << po;
     let mut res = Vec::with_capacity(blocksize - order);
     for p in 0..parts {
-        let cnt = if p == 0 { (blocksize >> po) - order } else { blocksize >> po };
+        let cnt = if p == 0 {
+            (blocksize >> po) - order
+        } else {
+            blocksize >> po
+        };
         let k = r.bits(pbits) as u32;
         let escape = (pbits == 4 && k == 0xF) || (pbits == 5 && k == 0x1F);
         if escape {
             let bw = r.bits(5) as u32;
-            for _ in 0..cnt { res.push(r.sbits(bw)); }
+            for _ in 0..cnt {
+                res.push(r.sbits(bw));
+            }
         } else {
             for _ in 0..cnt {
                 let q = r.unary();
@@ -388,10 +487,17 @@ fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Vec<i64> {
     res
 }
 
-fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Vec<i64> {
+fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Result<Vec<i64>, String> {
     let _pad = r.bit();
     let typ = r.bits(6);
-    let wasted = if r.bit() == 1 { r.unary() + 1 } else { 0 };
+    let wasted = if r.bit() == 1 {
+        r.unary().saturating_add(1)
+    } else {
+        0
+    };
+    if wasted >= bps {
+        return Err("FLAC: wasted bits exceed sample width".into());
+    }
     let b = bps - wasted;
     let mut s: Vec<i64> = if typ == 0 {
         vec![r.sbits(b); blocksize]
@@ -423,7 +529,9 @@ fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Vec<i64> {
         for i in 0..res.len() {
             let n = order + i;
             let mut p = 0i64;
-            for j in 0..order { p += coeffs[j] * s[n - 1 - j]; }
+            for j in 0..order {
+                p += coeffs[j] * s[n - 1 - j];
+            }
             s.push(res[i] + (p >> shift));
         }
         s
@@ -431,9 +539,11 @@ fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Vec<i64> {
         vec![0i64; blocksize]
     };
     if wasted > 0 {
-        for v in s.iter_mut() { *v <<= wasted; }
+        for v in s.iter_mut() {
+            *v <<= wasted;
+        }
     }
-    s
+    Ok(s)
 }
 
 /// Decode a real FLAC stream → (native samples interleaved, rate, channels, bps).
@@ -450,14 +560,22 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
         let len = r.bits(24) as usize;
         let blk_start = r.pos;
         if btype == 0 {
-            r.bits(16); r.bits(16); r.bits(24); r.bits(24); // block/frame sizes
+            r.bits(16);
+            r.bits(16);
+            r.bits(24);
+            r.bits(24); // block/frame sizes
             rate = r.bits(20) as u32;
             channels = (r.bits(3) + 1) as u16;
             bps = (r.bits(5) + 1) as u32;
             total = r.bits(36);
         }
         r.pos = blk_start + len * 8; // skip to end of metadata block
-        if last == 1 { break; }
+        if last == 1 {
+            break;
+        }
+        if r.pos > data.len() * 8 {
+            return Err("FLAC: truncated metadata".into());
+        }
     }
     if rate == 0 || channels == 0 {
         return Err("missing STREAMINFO".into());
@@ -467,7 +585,9 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
     let mut got = 0u64;
     while got < total {
         // frame header
-        if r.bits(14) != 0b11111111111110 { return Err(format!("lost sync at sample {got}")); }
+        if r.bits(14) != 0b11111111111110 {
+            return Err(format!("lost sync at sample {got}"));
+        }
         r.bits(1); // reserved
         r.bits(1); // blocking strategy
         let bsc = r.bits(4);
@@ -484,23 +604,53 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
             8..=15 => 256usize << (bsc - 8),
             _ => return Err("bad blocksize code".into()),
         };
-        match src { 12 => { r.bits(8); } 13 | 14 => { r.bits(16); } _ => {} }
+        match src {
+            12 => {
+                r.bits(8);
+            }
+            13 | 14 => {
+                r.bits(16);
+            }
+            _ => {}
+        }
         r.bits(8); // CRC-8 (header is byte-aligned here)
-        // subframes (decorrelation modes give the "side" channel +1 bit)
-        let nsub = if cassign < 8 { (cassign + 1) as usize } else { 2 };
+                   // subframes (decorrelation modes give the "side" channel +1 bit)
+        let nsub = if cassign < 8 {
+            (cassign + 1) as usize
+        } else {
+            2
+        };
         let mut sub: Vec<Vec<i64>> = Vec::with_capacity(nsub);
         for c in 0..nsub {
             let side_bonus = match cassign {
-                0b1000 => if c == 1 { 1 } else { 0 }, // left/side
-                0b1001 => if c == 0 { 1 } else { 0 }, // side/right
-                0b1010 => if c == 1 { 1 } else { 0 }, // mid/side
+                0b1000 => {
+                    if c == 1 {
+                        1
+                    } else {
+                        0
+                    }
+                } // left/side
+                0b1001 => {
+                    if c == 0 {
+                        1
+                    } else {
+                        0
+                    }
+                } // side/right
+                0b1010 => {
+                    if c == 1 {
+                        1
+                    } else {
+                        0
+                    }
+                } // mid/side
                 _ => 0,
             };
-            sub.push(decode_subframe(&mut r, bs, bps + side_bonus));
+            sub.push(decode_subframe(&mut r, bs, bps + side_bonus)?);
         }
         r.align();
         r.bits(16); // CRC-16
-        // channel decorrelation → independent L/R
+                    // channel decorrelation → independent L/R
         let frame: Vec<Vec<i64>> = match cassign {
             0b1000 => {
                 let (l, s) = (&sub[0], &sub[1]);
@@ -512,12 +662,25 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
             }
             0b1010 => {
                 let (m, s) = (&sub[0], &sub[1]);
-                let l: Vec<i64> = (0..bs).map(|i| { let m2 = (m[i] << 1) | (s[i] & 1); (m2 + s[i]) >> 1 }).collect();
-                let rr: Vec<i64> = (0..bs).map(|i| { let m2 = (m[i] << 1) | (s[i] & 1); (m2 - s[i]) >> 1 }).collect();
+                let l: Vec<i64> = (0..bs)
+                    .map(|i| {
+                        let m2 = (m[i] << 1) | (s[i] & 1);
+                        (m2 + s[i]) >> 1
+                    })
+                    .collect();
+                let rr: Vec<i64> = (0..bs)
+                    .map(|i| {
+                        let m2 = (m[i] << 1) | (s[i] & 1);
+                        (m2 - s[i]) >> 1
+                    })
+                    .collect();
                 vec![l, rr]
             }
             _ => sub,
         };
+        if frame.len() != ch {
+            return Err("FLAC: frame channel count differs from STREAMINFO".into());
+        }
         for c in 0..ch {
             chans[c].extend_from_slice(&frame[c]);
         }

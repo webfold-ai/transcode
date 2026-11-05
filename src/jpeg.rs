@@ -115,7 +115,16 @@ fn fdct8x8(block: &[f32; 64], basis: &[[f32; 8]; 8]) -> [f32; 64] {
     // column pass: out[u][v] = Σ_y b[u][y]·tmp[y][v]
     let mut out = [0.0f32; 64];
     for v in 0..8 {
-        let c = [tmp[v], tmp[8 + v], tmp[16 + v], tmp[24 + v], tmp[32 + v], tmp[40 + v], tmp[48 + v], tmp[56 + v]];
+        let c = [
+            tmp[v],
+            tmp[8 + v],
+            tmp[16 + v],
+            tmp[24 + v],
+            tmp[32 + v],
+            tmp[40 + v],
+            tmp[48 + v],
+            tmp[56 + v],
+        ];
         let s = [c[0] + c[7], c[1] + c[6], c[2] + c[5], c[3] + c[4]];
         let d = [c[0] - c[7], c[1] - c[6], c[2] - c[5], c[3] - c[4]];
         for u in (0..8).step_by(2) {
@@ -135,10 +144,21 @@ fn idct8x8(coef: &[f32; 64], basis: &[[f32; 8]; 8]) -> [f32; 64] {
     let mut tmp = [0.0f32; 64];
     // tmp[y][v] = Σ_u b[u][y]·coef[u][v]  (split by parity of u)
     for v in 0..8 {
-        let c = [coef[v], coef[8 + v], coef[16 + v], coef[24 + v], coef[32 + v], coef[40 + v], coef[48 + v], coef[56 + v]];
+        let c = [
+            coef[v],
+            coef[8 + v],
+            coef[16 + v],
+            coef[24 + v],
+            coef[32 + v],
+            coef[40 + v],
+            coef[48 + v],
+            coef[56 + v],
+        ];
         for y in 0..4 {
-            let e = basis[0][y] * c[0] + basis[2][y] * c[2] + basis[4][y] * c[4] + basis[6][y] * c[6];
-            let o = basis[1][y] * c[1] + basis[3][y] * c[3] + basis[5][y] * c[5] + basis[7][y] * c[7];
+            let e =
+                basis[0][y] * c[0] + basis[2][y] * c[2] + basis[4][y] * c[4] + basis[6][y] * c[6];
+            let o =
+                basis[1][y] * c[1] + basis[3][y] * c[3] + basis[5][y] * c[5] + basis[7][y] * c[7];
             tmp[y * 8 + v] = e + o;
             tmp[(7 - y) * 8 + v] = e - o;
         }
@@ -148,8 +168,10 @@ fn idct8x8(coef: &[f32; 64], basis: &[[f32; 8]; 8]) -> [f32; 64] {
     for y in 0..8 {
         let r = &tmp[y * 8..y * 8 + 8];
         for x in 0..4 {
-            let e = basis[0][x] * r[0] + basis[2][x] * r[2] + basis[4][x] * r[4] + basis[6][x] * r[6];
-            let o = basis[1][x] * r[1] + basis[3][x] * r[3] + basis[5][x] * r[5] + basis[7][x] * r[7];
+            let e =
+                basis[0][x] * r[0] + basis[2][x] * r[2] + basis[4][x] * r[4] + basis[6][x] * r[6];
+            let o =
+                basis[1][x] * r[1] + basis[3][x] * r[3] + basis[5][x] * r[5] + basis[7][x] * r[7];
             out[y * 8 + x] = e + o;
             out[y * 8 + (7 - x)] = e - o;
         }
@@ -200,7 +222,8 @@ impl HuffDec {
                         let sym = *vals.get(k + j).unwrap_or(&0) as u16;
                         let entry = ((l as u16) << 8) | sym;
                         let base = c << shift;
-                        for p in base..(base + (1 << shift)).min(fast.len()) { // bound malformed codes
+                        for p in base..(base + (1 << shift)).min(fast.len()) {
+                            // bound malformed codes
                             fast[p] = entry;
                         }
                     }
@@ -213,7 +236,13 @@ impl HuffDec {
             }
             code <<= 1;
         }
-        HuffDec { mincode, maxcode, valptr, vals: vals.to_vec(), fast }
+        HuffDec {
+            mincode,
+            maxcode,
+            valptr,
+            vals: vals.to_vec(),
+            fast,
+        }
     }
 }
 
@@ -259,7 +288,14 @@ struct JpegBitReader<'a> {
 
 impl<'a> JpegBitReader<'a> {
     fn new(data: &'a [u8], pos: usize) -> Self {
-        JpegBitReader { data, pos, acc: 0, nbits: 0, hit_marker: false, marker: 0 }
+        JpegBitReader {
+            data,
+            pos,
+            acc: 0,
+            nbits: 0,
+            hit_marker: false,
+            marker: 0,
+        }
     }
     fn fill(&mut self) {
         // 64-bit accumulator, MSB-first (next bit at bit 63). Bulk-load 4
@@ -388,7 +424,11 @@ struct JpegBitWriter {
 
 impl JpegBitWriter {
     fn new() -> Self {
-        JpegBitWriter { buf: Vec::new(), acc: 0, nbits: 0 }
+        JpegBitWriter {
+            buf: Vec::new(),
+            acc: 0,
+            nbits: 0,
+        }
     }
     fn put_bits(&mut self, code: u32, len: u32) {
         // place `code` just below the filled region of the 64-bit accumulator
@@ -449,14 +489,6 @@ fn clamp_u8(v: f32) -> u8 {
 }
 
 #[inline]
-fn ycbcr_to_rgb(y: f32, cb: f32, cr: f32) -> (u8, u8, u8) {
-    let r = y + 1.402 * (cr - 128.0);
-    let g = y - 0.344136 * (cb - 128.0) - 0.714136 * (cr - 128.0);
-    let b = y + 1.772 * (cb - 128.0);
-    (clamp_u8(r), clamp_u8(g), clamp_u8(b))
-}
-
-#[inline]
 fn rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let y = 0.299 * r + 0.587 * g + 0.114 * b;
     let cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128.0;
@@ -473,9 +505,9 @@ struct Component {
     id: u8,
     h: u8,
     v: u8,
-    tq: u8,   // quant table selector
-    td: u8,   // DC huff selector
-    ta: u8,   // AC huff selector
+    tq: u8, // quant table selector
+    td: u8, // DC huff selector
+    ta: u8, // AC huff selector
     // full-resolution plane (filled after upsampling); during scan, blocks
     // are written into a per-component grid sized to its own sampling.
     plane: Vec<u8>,
@@ -508,11 +540,25 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
         }
         let marker = data[p + 1];
         p += 2;
+        if p + 2 > data.len() {
+            return Err("JPEG: truncated marker".into());
+        }
+        // Every marker except the standalone ones carries a 2-byte length that counts itself.
+        // The segment must have room for that length and lie inside the input before any field is read.
+        if !matches!(marker, 0x01 | 0xD0..=0xD9) {
+            let seg = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
+            if seg < 2 || p + seg > data.len() {
+                return Err("JPEG: segment length outside the input".into());
+            }
+        }
         match marker {
             0xD9 => return Err("JPEG: EOI before scan".into()),
             0xC0 | 0xC1 => {
                 // SOF0 baseline / SOF1 extended sequential (treat same)
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
+                if len < 7 {
+                    return Err("JPEG: frame header too short".into());
+                }
                 let prec = data[p + 2];
                 if prec != 8 {
                     return Err("JPEG: only 8-bit precision".into());
@@ -522,13 +568,19 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 // Anti-bomb (the streaming-law bound): a JPEG cannot decode more 8×8 blocks than its
                 // entropy stream has bytes (≥ ~1 byte/MCU). Reject attacker-inflated dimensions in
                 // O(1) — a compare, never an allocation sized by the declared (untrusted) header.
-                if width == 0 || height == 0 { return Err("JPEG: zero dimension".into()); }
+                if width == 0 || height == 0 {
+                    return Err("JPEG: zero dimension".into());
+                }
                 // Two bounds, both O(1): (1) a generous data-relative check (a JPEG block needs
                 // entropy; ≥ ~1 byte per 16 blocks rejects truncated bombs) and (2) the absolute 100MP
                 // backstop (≤ 400 MiB RGBA) — no real document image approaches either.
                 let blocks = (width / 8 + 1) as u64 * (height / 8 + 1) as u64;
-                if blocks > data.len() as u64 * 16 { return Err("JPEG: dimensions exceed data".into()); }
-                if (width as u64) * (height as u64) > 100_000_000 { return Err("JPEG: exceeds 100MP".into()); }
+                if blocks > data.len() as u64 * 16 {
+                    return Err("JPEG: dimensions exceed data".into());
+                }
+                if (width as u64) * (height as u64) > 100_000_000 {
+                    return Err("JPEG: exceeds 100MP".into());
+                }
                 let nc = data[p + 7] as usize;
                 comps.clear();
                 for i in 0..nc {
@@ -551,13 +603,20 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
                 let mut q = p + 2;
                 let end = p + len;
-                if end > data.len() { return Err("JPEG: truncated DHT".into()); } // bound the segment
+                if end > data.len() {
+                    return Err("JPEG: truncated DHT".into());
+                } // bound the segment
                 while q < end {
                     let tc_th = data[q];
                     let class = tc_th >> 4;
                     let id = (tc_th & 0x0F) as usize;
-                    if id >= 4 { return Err("JPEG: bad Huffman table id".into()); } // index is 0..3
+                    if id >= 4 {
+                        return Err("JPEG: bad Huffman table id".into());
+                    } // index is 0..3
                     q += 1;
+                    if q + 16 > end {
+                        return Err("JPEG: truncated DHT counts".into());
+                    }
                     let mut bits = [0u8; 16];
                     let mut total = 0usize;
                     for b in &mut bits {
@@ -565,7 +624,9 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                         total += *b as usize;
                         q += 1;
                     }
-                    if q + total > data.len() { return Err("JPEG: truncated DHT values".into()); }
+                    if q + total > data.len() {
+                        return Err("JPEG: truncated DHT values".into());
+                    }
                     let vals = data[q..q + total].to_vec();
                     q += total;
                     let h = HuffDec::build(&bits, &vals);
@@ -582,15 +643,23 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
                 let mut q = p + 2;
                 let end = p + len;
-                if end > data.len() { return Err("JPEG: truncated DQT".into()); } // bound the segment
+                if end > data.len() {
+                    return Err("JPEG: truncated DQT".into());
+                } // bound the segment
                 while q < end {
                     let pq_tq = data[q];
                     let prec = pq_tq >> 4;
                     let id = (pq_tq & 0x0F) as usize;
-                    if id >= 4 { return Err("JPEG: bad quant table id".into()); } // index is 0..3
+                    if id >= 4 {
+                        return Err("JPEG: bad quant table id".into());
+                    } // index is 0..3
                     q += 1;
                     let mut table = [0u16; 64];
                     for k in 0..64 {
+                        let need = if prec == 0 { 1 } else { 2 };
+                        if q + need > end {
+                            return Err("JPEG: truncated DQT".into());
+                        }
                         if prec == 0 {
                             table[ZIGZAG[k]] = data[q] as u16;
                             q += 1;
@@ -605,13 +674,22 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
             }
             0xDD => {
                 // DRI
+                if p + 4 > data.len() {
+                    return Err("JPEG: truncated restart interval".into());
+                }
                 restart_interval = u16::from_be_bytes([data[p + 2], data[p + 3]]) as usize;
                 p += 4;
             }
             0xDA => {
                 // SOS
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
-                let ns = data[p + 2] as usize;
+                let ns = *data
+                    .get(p + 2)
+                    .ok_or_else(|| "JPEG: truncated scan header".to_string())?
+                    as usize;
+                if 3 + 2 * ns > len {
+                    return Err("JPEG: scan header too short for its component count".into());
+                }
                 for i in 0..ns {
                     let cs = data[p + 3 + i * 2];
                     let tdta = data[p + 4 + i * 2];
@@ -623,17 +701,31 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                 p += len;
                 // entropy-coded data begins at p
                 return decode_scan(
-                    data, p, width, height, &mut comps, &qtables, &dc_huff, &ac_huff,
-                    restart_interval, adobe, &basis,
+                    data,
+                    p,
+                    width,
+                    height,
+                    &mut comps,
+                    &qtables,
+                    &dc_huff,
+                    &ac_huff,
+                    restart_interval,
+                    adobe,
+                    &basis,
                 );
             }
-            0xD8 => {}                              // SOI (shouldn't recur)
-            0x01 | 0xD0..=0xD7 => {}                // TEM / stray RST
+            0xD8 => {}               // SOI (shouldn't recur)
+            0x01 | 0xD0..=0xD7 => {} // TEM / stray RST
             0xEE => {
                 // APP14 Adobe: the transform byte (0 = CMYK/RGB, 1 = YCbCr, 2 = YCCK) — needed to
                 // colour-convert 4-component (CMYK) JPEGs, which Adobe also stores inverted.
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
-                if len >= 14 && &data[p + 2..p + 7] == b"Adobe" { adobe = Some(data[p + 13]); }
+                if p + len > data.len() {
+                    return Err("JPEG: truncated APP14".into());
+                }
+                if len >= 14 && &data[p + 2..p + 7] == b"Adobe" {
+                    adobe = Some(data[p + 13]);
+                }
                 p += len;
             }
             _ => {
@@ -659,6 +751,11 @@ fn decode_scan(
     adobe: Option<u8>,
     basis: &[[f32; 8]; 8],
 ) -> Result<Image, String> {
+    // Only the grey (1), YCbCr (3) and CMYK (4) paths exist. Any other count, including a scan
+    // before any frame header, would index past the component list.
+    if !matches!(comps.len(), 1 | 3 | 4) {
+        return Err("JPEG: unsupported component count".into());
+    }
     let hmax = comps.iter().map(|c| c.h).max().unwrap_or(1) as usize;
     let vmax = comps.iter().map(|c| c.v).max().unwrap_or(1) as usize;
     let mcus_x = (width + 8 * hmax - 1) / (8 * hmax);
@@ -684,9 +781,13 @@ fn decode_scan(
                 }
             }
             for (ci, c) in comps.iter_mut().enumerate() {
-                let dch = dc_huff.get(c.td as usize).and_then(|x| x.as_ref())
+                let dch = dc_huff
+                    .get(c.td as usize)
+                    .and_then(|x| x.as_ref())
                     .ok_or("JPEG: missing DC table")?;
-                let ach = ac_huff.get(c.ta as usize).and_then(|x| x.as_ref())
+                let ach = ac_huff
+                    .get(c.ta as usize)
+                    .and_then(|x| x.as_ref())
                     .ok_or("JPEG: missing AC table")?;
                 let qt = qtables.get(c.tq as usize).ok_or("JPEG: missing Q table")?;
                 for by in 0..c.v as usize {
@@ -760,8 +861,12 @@ fn decode_scan(
     }
     if ncomp == 1 {
         let c = &comps[0];
-        let sxm: Vec<usize> = (0..width).map(|x| (x * c.h as usize / hmax).min(c.bw - 1)).collect();
-        let sym: Vec<usize> = (0..height).map(|y| (y * c.v as usize / vmax).min(c.bh - 1)).collect();
+        let sxm: Vec<usize> = (0..width)
+            .map(|x| (x * c.h as usize / hmax).min(c.bw - 1))
+            .collect();
+        let sym: Vec<usize> = (0..height)
+            .map(|y| (y * c.v as usize / vmax).min(c.bh - 1))
+            .collect();
         for y in 0..height {
             let row = sym[y] * c.bw;
             for x in 0..width {
@@ -778,10 +883,14 @@ fn decode_scan(
         // white-minus-ink); for transform==2 the first three are YCCK (YCbCr of the CMY). Recover
         // (R,G,B) from the first three, then multiply by K — RGB = C'·K'/255 — the libjpeg path.
         let sxm = |c: &Component| -> Vec<usize> {
-            (0..width).map(|x| (x * c.h as usize / hmax).min(c.bw - 1)).collect()
+            (0..width)
+                .map(|x| (x * c.h as usize / hmax).min(c.bw - 1))
+                .collect()
         };
         let sym = |c: &Component| -> Vec<usize> {
-            (0..height).map(|y| (y * c.v as usize / vmax).min(c.bh - 1)).collect()
+            (0..height)
+                .map(|y| (y * c.v as usize / vmax).min(c.bh - 1))
+                .collect()
         };
         let maps: Vec<(Vec<usize>, Vec<usize>)> = comps.iter().map(|c| (sxm(c), sym(c))).collect();
         let ycck = adobe == Some(2);
@@ -795,9 +904,11 @@ fn decode_scan(
                 // For YCCK the first three YCbCr→RGB *to CMY directly*; for plain CMYK they are CMY.
                 // Final RGB = (255 − CMY)·K/255 (K = the stored 4th channel, Adobe convention).
                 let (cy, mg, ye) = if ycck {
-                    (cl(c0 + cr_r[c2 as usize]),
-                     cl(c0 - cb_g[c1 as usize] - cr_g[c2 as usize]),
-                     cl(c0 + cb_b[c1 as usize]))
+                    (
+                        cl(c0 + cr_r[c2 as usize]),
+                        cl(c0 - cb_g[c1 as usize] - cr_g[c2 as usize]),
+                        cl(c0 + cb_b[c1 as usize]),
+                    )
                 } else {
                     (c0 as u8, c1 as u8, c2 as u8)
                 };
@@ -811,10 +922,14 @@ fn decode_scan(
     } else {
         let (cy, ccb, ccr) = (&comps[0], &comps[1], &comps[2]);
         let sxm = |c: &Component| -> Vec<usize> {
-            (0..width).map(|x| (x * c.h as usize / hmax).min(c.bw - 1)).collect()
+            (0..width)
+                .map(|x| (x * c.h as usize / hmax).min(c.bw - 1))
+                .collect()
         };
         let sym = |c: &Component| -> Vec<usize> {
-            (0..height).map(|y| (y * c.v as usize / vmax).min(c.bh - 1)).collect()
+            (0..height)
+                .map(|y| (y * c.v as usize / vmax).min(c.bh - 1))
+                .collect()
         };
         let (yxm, yym) = (sxm(cy), sym(cy));
         let (bxm, bym) = (sxm(ccb), sym(ccb));
@@ -834,7 +949,11 @@ fn decode_scan(
         }
     }
 
-    Ok(Image { width: width as u32, height: height as u32, pixels })
+    Ok(Image {
+        width: width as u32,
+        height: height as u32,
+        pixels,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -902,7 +1021,7 @@ pub fn encode(width: u32, height: u32, pixels: &[u8], quality: u32) -> Result<Ve
     // ── headers ──
     let mut out = Vec::new();
     put_marker(&mut out, 0xD8); // SOI
-    // APP0 JFIF
+                                // APP0 JFIF
     put_seg(
         &mut out,
         0xE0,
@@ -1019,7 +1138,11 @@ fn encode_block(
     let s = magnitude_category(diff);
     bw.put_bits(dch.codes[s as usize], dch.sizes[s as usize] as u32);
     if s > 0 {
-        let v = if diff < 0 { (diff - 1) & ((1 << s) - 1) } else { diff } as u32;
+        let v = if diff < 0 {
+            (diff - 1) & ((1 << s) - 1)
+        } else {
+            diff
+        } as u32;
         bw.put_bits(v, s);
     }
     // AC in zigzag order
@@ -1037,7 +1160,11 @@ fn encode_block(
             let s = magnitude_category(coef);
             let rs = ((run << 4) | s) as usize;
             bw.put_bits(ach.codes[rs], ach.sizes[rs] as u32);
-            let v = if coef < 0 { (coef - 1) & ((1 << s) - 1) } else { coef } as u32;
+            let v = if coef < 0 {
+                (coef - 1) & ((1 << s) - 1)
+            } else {
+                coef
+            } as u32;
             bw.put_bits(v, s);
             run = 0;
         }
@@ -1121,7 +1248,11 @@ mod huff_bench {
         for _ in 0..nsym {
             st = st.wrapping_mul(1664525).wrapping_add(1013904223);
             // realistic skew: ~80% of symbols are the short-code (low-index) ones
-            let sym = if (st >> 8) % 100 < 80 { (st >> 16) as usize % 12 } else { (st >> 16) as usize % 162 };
+            let sym = if (st >> 8) % 100 < 80 {
+                (st >> 16) as usize % 12
+            } else {
+                (st >> 16) as usize % 162
+            };
             let s = AC_LUMA_VALS[sym] as usize;
             bw.put_bits(enc.codes[s], enc.sizes[s] as u32);
         }
@@ -1131,7 +1262,9 @@ mod huff_bench {
         let run_fast = || {
             let mut br = JpegBitReader::new(&data, 0);
             let mut acc = 0u32;
-            for _ in 0..nsym { acc = acc.wrapping_add(br.decode_huff(&h).unwrap() as u32); }
+            for _ in 0..nsym {
+                acc = acc.wrapping_add(br.decode_huff(&h).unwrap() as u32);
+            }
             acc
         };
         // slow-only decoder (the old per-bit walk)
@@ -1152,16 +1285,38 @@ mod huff_bench {
             }
             acc
         };
-        assert_eq!(run_fast(), run_slow(), "fast and slow must decode identically");
+        assert_eq!(
+            run_fast(),
+            run_slow(),
+            "fast and slow must decode identically"
+        );
         let (mut fmin, mut smin) = (1e9f64, 1e9f64);
         for _ in 0..20 {
-            let t = Instant::now(); std::hint::black_box(run_slow()); let e = t.elapsed().as_secs_f64(); if e < smin { smin = e; }
-            let t = Instant::now(); std::hint::black_box(run_fast()); let e = t.elapsed().as_secs_f64(); if e < fmin { fmin = e; }
+            let t = Instant::now();
+            std::hint::black_box(run_slow());
+            let e = t.elapsed().as_secs_f64();
+            if e < smin {
+                smin = e;
+            }
+            let t = Instant::now();
+            std::hint::black_box(run_fast());
+            let e = t.elapsed().as_secs_f64();
+            if e < fmin {
+                fmin = e;
+            }
         }
         eprintln!("Huffman decode {nsym} symbols (min of 20, interleaved):");
-        eprintln!("  per-bit (old): {:.3} ms   {:.1} Msym/s", smin*1e3, nsym as f64/1e6/smin);
-        eprintln!("  fast table:    {:.3} ms   {:.1} Msym/s", fmin*1e3, nsym as f64/1e6/fmin);
-        eprintln!("  speedup: {:.2}x", smin/fmin);
+        eprintln!(
+            "  per-bit (old): {:.3} ms   {:.1} Msym/s",
+            smin * 1e3,
+            nsym as f64 / 1e6 / smin
+        );
+        eprintln!(
+            "  fast table:    {:.3} ms   {:.1} Msym/s",
+            fmin * 1e3,
+            nsym as f64 / 1e6 / fmin
+        );
+        eprintln!("  speedup: {:.2}x", smin / fmin);
     }
 }
 
@@ -1175,40 +1330,73 @@ mod writer_bench {
     fn bulk_vs_bytewise() {
         // deterministic (code,len) stream resembling JPEG entropy
         let mut st = 0x2468u32;
-        let syms: Vec<(u32, u32)> = (0..300_000).map(|_| {
-            st = st.wrapping_mul(1103515245).wrapping_add(12345);
-            let len = 2 + (st >> 28) % 11;          // 2..12 bits
-            let code = (st >> 8) & ((1 << len) - 1);
-            (code, len)
-        }).collect();
+        let syms: Vec<(u32, u32)> = (0..300_000)
+            .map(|_| {
+                st = st.wrapping_mul(1103515245).wrapping_add(12345);
+                let len = 2 + (st >> 28) % 11; // 2..12 bits
+                let code = (st >> 8) & ((1 << len) - 1);
+                (code, len)
+            })
+            .collect();
 
         let bulk = || {
             let mut w = JpegBitWriter::new();
-            for &(c, l) in &syms { w.put_bits(c, l); }
+            for &(c, l) in &syms {
+                w.put_bits(c, l);
+            }
             w.flush();
             w.buf
         };
         // byte-at-a-time reference (the old writer)
         let bytewise = || {
             let mut buf = Vec::new();
-            let mut acc = 0u32; let mut nbits = 0u32;
-            let mut put = |buf: &mut Vec<u8>, acc: &mut u32, nbits: &mut u32, code: u32, len: u32| {
-                *acc |= code << (32 - *nbits - len); *nbits += len;
-                while *nbits >= 8 { let b=(*acc>>24)as u8; buf.push(b); if b==0xFF{buf.push(0);} *acc<<=8; *nbits-=8; }
+            let mut acc = 0u32;
+            let mut nbits = 0u32;
+            let put = |buf: &mut Vec<u8>, acc: &mut u32, nbits: &mut u32, code: u32, len: u32| {
+                *acc |= code << (32 - *nbits - len);
+                *nbits += len;
+                while *nbits >= 8 {
+                    let b = (*acc >> 24) as u8;
+                    buf.push(b);
+                    if b == 0xFF {
+                        buf.push(0);
+                    }
+                    *acc <<= 8;
+                    *nbits -= 8;
+                }
             };
-            for &(c, l) in &syms { put(&mut buf, &mut acc, &mut nbits, c, l); }
-            if nbits % 8 != 0 { let p=8-nbits%8; put(&mut buf,&mut acc,&mut nbits,(1<<p)-1,p); }
+            for &(c, l) in &syms {
+                put(&mut buf, &mut acc, &mut nbits, c, l);
+            }
+            if nbits % 8 != 0 {
+                let p = 8 - nbits % 8;
+                put(&mut buf, &mut acc, &mut nbits, (1 << p) - 1, p);
+            }
             buf
         };
-        assert_eq!(bulk(), bytewise(), "bulk and byte-wise writers must produce identical bytes");
+        assert_eq!(
+            bulk(),
+            bytewise(),
+            "bulk and byte-wise writers must produce identical bytes"
+        );
         let (mut bmin, mut wmin) = (1e9f64, 1e9f64);
         for _ in 0..20 {
-            let t=Instant::now(); std::hint::black_box(bytewise()); let e=t.elapsed().as_secs_f64(); if e<wmin{wmin=e;}
-            let t=Instant::now(); std::hint::black_box(bulk());     let e=t.elapsed().as_secs_f64(); if e<bmin{bmin=e;}
+            let t = Instant::now();
+            std::hint::black_box(bytewise());
+            let e = t.elapsed().as_secs_f64();
+            if e < wmin {
+                wmin = e;
+            }
+            let t = Instant::now();
+            std::hint::black_box(bulk());
+            let e = t.elapsed().as_secs_f64();
+            if e < bmin {
+                bmin = e;
+            }
         }
         eprintln!("bit writer, 300k symbols (min of 20, interleaved):");
-        eprintln!("  byte-wise (old): {:.3} ms", wmin*1e3);
-        eprintln!("  bulk u64+SWAR:   {:.3} ms", bmin*1e3);
-        eprintln!("  speedup: {:.2}x", wmin/bmin);
+        eprintln!("  byte-wise (old): {:.3} ms", wmin * 1e3);
+        eprintln!("  bulk u64+SWAR:   {:.3} ms", bmin * 1e3);
+        eprintln!("  speedup: {:.2}x", wmin / bmin);
     }
 }

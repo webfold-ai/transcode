@@ -191,8 +191,14 @@ mod tests {
         let d = Dct::new(n);
         let flat = vec![100i64; n];
         let f = d.forward(&flat);
-        assert!(f[1..].iter().all(|&c| c.abs() <= 1), "AC of flat input not ~0: {f:?}");
+        assert!(
+            f[1..].iter().all(|&c| c.abs() <= 1),
+            "AC of flat input not ~0: {f:?}"
+        );
         let r = d.inverse(&f);
-        assert!(r.iter().all(|&v| (v - 100).abs() <= 2), "flat not recovered: {r:?}");
+        assert!(
+            r.iter().all(|&v| (v - 100).abs() <= 2),
+            "flat not recovered: {r:?}"
+        );
     }
 }

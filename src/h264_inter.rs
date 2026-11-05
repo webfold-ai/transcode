@@ -151,11 +151,15 @@ mod tests {
         assert_eq!(nals, 10, "expected SPS+PPS+IDR+7P start codes, got {nals}");
         // a static clip (1 IDR + 7 skip P-slices) must be far smaller than the
         // same 8 frames coded as independent IDRs (all visibly different).
-        let diff_frames: Vec<Vec<u8>> =
-            (0..8).map(|t| frame(w as usize, h as usize, t * 50)).collect();
+        let diff_frames: Vec<Vec<u8>> = (0..8)
+            .map(|t| frame(w as usize, h as usize, t * 50))
+            .collect();
         let idr_only = encode_ipppp(&diff_frames, w, h, 28, 2).expect("all-idr");
         let idr_nals = idr_only.windows(4).filter(|x| *x == [0, 0, 0, 1]).count();
-        assert_eq!(idr_nals, 10, "all-different frames should be 8 IDRs (+SPS+PPS)");
+        assert_eq!(
+            idr_nals, 10,
+            "all-different frames should be 8 IDRs (+SPS+PPS)"
+        );
         assert!(
             stream.len() * 3 < idr_only.len(),
             "skip stream {} should be ≪ all-IDR {}",
@@ -168,10 +172,15 @@ mod tests {
     fn changed_frames_rekey() {
         let (w, h) = (32u32, 32u32);
         // each frame visibly different → every frame should re-key (IDR)
-        let frames: Vec<Vec<u8>> = (0..4).map(|t| frame(w as usize, h as usize, t * 60)).collect();
+        let frames: Vec<Vec<u8>> = (0..4)
+            .map(|t| frame(w as usize, h as usize, t * 60))
+            .collect();
         let stream = encode_ipppp(&frames, w, h, 28, 2).expect("encode");
         // SPS+PPS + 4 IDR = 6 start codes
         let nals = stream.windows(4).filter(|x| *x == [0, 0, 0, 1]).count();
-        assert_eq!(nals, 6, "all-different frames should produce 4 IDRs (+SPS+PPS)");
+        assert_eq!(
+            nals, 6,
+            "all-different frames should produce 4 IDRs (+SPS+PPS)"
+        );
     }
 }

@@ -19,16 +19,21 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 use crate::av1_ec::Writer;
-use crate::av1_obu::{sequence_header_obu, temporal_delimiter, wrap_obu, write_frame_header, OBU_FRAME};
+use crate::av1_obu::{
+    sequence_header_obu, temporal_delimiter, wrap_obu, write_frame_header, OBU_FRAME,
+};
 use crate::h264bits::BitWriter;
 
 // dav1d default-CDF cumulative args (src/cdf.c). icdf[i] = 32768 − arg[i].
-const PARTITION_64_CTX0: [u16; 9] =
-    [20137, 21547, 23078, 29566, 29837, 30261, 30524, 30892, 31724]; // 10 symbols
-const KF_YMODE_00: [u16; 12] =
-    [15588, 17027, 19338, 20218, 20682, 21110, 21825, 23244, 24189, 28165, 29093, 30466]; // 13
-const UV_MODE_DC: [u16; 12] =
-    [22631, 24152, 25378, 25661, 25986, 26520, 27055, 27923, 28244, 30059, 30941, 31961]; // 13
+const PARTITION_64_CTX0: [u16; 9] = [
+    20137, 21547, 23078, 29566, 29837, 30261, 30524, 30892, 31724,
+]; // 10 symbols
+const KF_YMODE_00: [u16; 12] = [
+    15588, 17027, 19338, 20218, 20682, 21110, 21825, 23244, 24189, 28165, 29093, 30466,
+]; // 13
+const UV_MODE_DC: [u16; 12] = [
+    22631, 24152, 25378, 25661, 25986, 26520, 27055, 27923, 28244, 30059, 30941, 31961,
+]; // 13
 
 // Coefficient-skip (all_zero / txb_skip) defaults, coef.skip[qctx=3][tx_ctx][ctx]
 // (dav1d cdf.c). Stored 2-entry [icdf, count] for the adaptive bool.
@@ -81,8 +86,9 @@ fn encode_tile_flat_dc() -> Vec<u8> {
 
 // Coefficient CDFs for the nonzero luma-DC path (dav1d cdf.c, qctx=3),
 // all verified bit-for-bit against dav1d's per-symbol rng trace.
-const EOB_BIN_1024_L: [u16; 10] =
-    [6698, 8334, 11961, 15762, 20186, 23862, 27434, 29326, 31082, 32050]; // [chroma=0]
+const EOB_BIN_1024_L: [u16; 10] = [
+    6698, 8334, 11961, 15762, 20186, 23862, 27434, 29326, 31082, 32050,
+]; // [chroma=0]
 const EOB_BASE_TOK_64: [u16; 2] = [12358, 24977]; // eob_base_tok[ctx=4][0][0]
 const BR_TOK_64: [u16; 3] = [12162, 18785, 22648]; // br_tok[imin(ctx,3)=3][0][0]
 const DC_SIGN_L: u16 = 16000; // dc_sign[chroma=0][ctx=0]
@@ -137,7 +143,7 @@ fn encode_tile_dc(dc_tok: u32, dc_sign: bool) -> Vec<u8> {
     w.symbol(0, &mut ym, 13); // y_mode = DC
     let mut uv = cdf(&UV_MODE_DC);
     w.symbol(0, &mut uv, 13); // uv_mode = DC
-    // luma residual: all_zero = 0 (has the DC coeff)
+                              // luma residual: all_zero = 0 (has the DC coeff)
     let mut luma_az = bcdf(COEF_SKIP_TX64_C0);
     w.bool_adapt(false, &mut luma_az);
     // eob_pt = 0 (dc-only)
@@ -189,7 +195,7 @@ fn encode_tile_dc_ac(dc_lvl: u32, dc_neg: bool, ac_lvl: u32, ac_neg: bool) -> Ve
     w.bool_adapt(false, &mut az); // all_zero = 0
     let mut eb = cdf(&EOB_BIN_1024_L);
     w.symbol(1, &mut eb, 11); // eob_pt = 1
-    // eob coeff (scan[1]) via eob_base_tok[ctx=1]; tok = ac_lvl (≤2 ⇒ no hi)
+                              // eob coeff (scan[1]) via eob_base_tok[ctx=1]; tok = ac_lvl (≤2 ⇒ no hi)
     let mut et = cdf(&EOB_BASE_TOK_64_C1);
     w.symbol((ac_lvl - 1) as usize, &mut et, 3);
     // DC (scan[0]) via base_tok[ctx=0]; tok = dc_lvl (≤2 ⇒ no hi)
@@ -271,9 +277,21 @@ mod tests {
         let s = encode_flat_keyframe_64();
         assert_eq!(s.len(), 21);
         assert_eq!(&s[0..2], &[0x12, 0x00], "temporal delimiter");
-        assert_eq!(&s[2..10], &[0x0a, 0x06, 0x18, 0x15, 0x7f, 0xfd, 0xa0, 0x08], "seq header");
+        assert_eq!(
+            &s[2..10],
+            &[0x0a, 0x06, 0x18, 0x15, 0x7f, 0xfd, 0xa0, 0x08],
+            "seq header"
+        );
         assert_eq!(&s[10..12], &[0x32, 0x09], "OBU_FRAME header + size");
-        assert_eq!(&s[12..19], &[0x18, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00], "frame header");
-        assert_eq!(&s[19..21], &[0x31, 0x80], "tile (skip=0, all-zero residual)");
+        assert_eq!(
+            &s[12..19],
+            &[0x18, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00],
+            "frame header"
+        );
+        assert_eq!(
+            &s[19..21],
+            &[0x31, 0x80],
+            "tile (skip=0, all-zero residual)"
+        );
     }
 }

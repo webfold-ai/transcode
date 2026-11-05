@@ -74,7 +74,7 @@ pub fn sequence_header_obu(w: u32, h: u32) -> Vec<u8> {
     bw.put_bits(0, 3); // seq_profile = 0
     bw.put_flag(true); // still_picture = 1
     bw.put_flag(true); // reduced_still_picture_header = 1
-    // reduced path: operating_points_cnt=1, idc=0, tier=0, no decoder model
+                       // reduced path: operating_points_cnt=1, idc=0, tier=0, no decoder model
     bw.put_bits(0, 5); // seq_level_idx[0] = 0
 
     let wb = size_bits(w - 1); // frame_width_bits = ceil bits of (w-1)
@@ -83,12 +83,12 @@ pub fn sequence_header_obu(w: u32, h: u32) -> Vec<u8> {
     bw.put_bits(hb - 1, 4); // frame_height_bits_minus_1
     bw.put_bits(w - 1, wb); // max_frame_width_minus_1
     bw.put_bits(h - 1, hb); // max_frame_height_minus_1
-    // reduced: frame_id_numbers_present_flag = 0 (not coded)
+                            // reduced: frame_id_numbers_present_flag = 0 (not coded)
 
     bw.put_flag(false); // use_128x128_superblock = 0 (64×64 SB)
     bw.put_flag(true); // enable_filter_intra = 1
     bw.put_flag(true); // enable_intra_edge_filter = 1
-    // reduced: all inter enable_* flags absent / 0
+                       // reduced: all inter enable_* flags absent / 0
 
     bw.put_flag(false); // enable_superres = 0
     bw.put_flag(true); // enable_cdef = 1
@@ -99,7 +99,7 @@ pub fn sequence_header_obu(w: u32, h: u32) -> Vec<u8> {
     bw.put_flag(false); // mono_chrome = 0 (profile 0)
     bw.put_flag(false); // color_description_present_flag = 0
     bw.put_flag(false); // color_range = 0 (studio)
-    // profile 0 ⇒ subsampling_x = subsampling_y = 1 (4:2:0), not coded
+                        // profile 0 ⇒ subsampling_x = subsampling_y = 1 (4:2:0), not coded
     bw.put_bits(0, 2); // chroma_sample_position = CSP_UNKNOWN
     bw.put_flag(false); // separate_uv_delta_q = 0
 
@@ -120,10 +120,10 @@ pub fn write_frame_header(bw: &mut BitWriter, _w: u32, _h: u32, base_q_idx: u8) 
     // (reduced) frame_type=KEY_FRAME, show_frame=1, error_resilient_mode=1 — none coded
     bw.put_flag(false); // disable_cdf_update = 0
     bw.put_flag(false); // allow_screen_content_tools = 0
-    // frame_size_override=0 (reduced), order_hint absent, refresh=allFrames — none coded
-    // frame_size(): override 0 + superres disabled → no bits
+                        // frame_size_override=0 (reduced), order_hint absent, refresh=allFrames — none coded
+                        // frame_size(): override 0 + superres disabled → no bits
     bw.put_flag(false); // render_and_frame_size_different = 0
-    // allow_intrabc absent (screen_content_tools=0); disable_frame_end_update_cdf=1 (reduced)
+                        // allow_intrabc absent (screen_content_tools=0); disable_frame_end_update_cdf=1 (reduced)
 
     // tile_info() — single 64×64 tile for a ≤64×64 frame
     bw.put_flag(true); // uniform_tile_spacing_flag = 1 (no increments: maxLog2Tiles=0)
@@ -144,7 +144,7 @@ pub fn write_frame_header(bw: &mut BitWriter, _w: u32, _h: u32, base_q_idx: u8) 
     // loop_filter_params() (not CodedLossless, not intrabc ⇒ coded) — levels 0 = off
     bw.put_bits(0, 6); // loop_filter_level[0] = 0
     bw.put_bits(0, 6); // loop_filter_level[1] = 0
-    // level[0]||level[1] == 0 ⇒ level[2],[3] not coded
+                       // level[0]||level[1] == 0 ⇒ level[2],[3] not coded
     bw.put_bits(0, 3); // loop_filter_sharpness = 0
     bw.put_flag(true); // loop_filter_delta_enabled = 1 (matches libaom; harmless at level 0)
     bw.put_flag(false); // loop_filter_delta_update = 0
@@ -160,9 +160,9 @@ pub fn write_frame_header(bw: &mut BitWriter, _w: u32, _h: u32, base_q_idx: u8) 
     // lr_params() — enable_restoration=0 ⇒ nothing
     // read_tx_mode()
     bw.put_flag(false); // tx_mode_select = 0 → TX_MODE_LARGEST
-    // frame_reference_mode / skip_mode_params — intra, nothing
+                        // frame_reference_mode / skip_mode_params — intra, nothing
     bw.put_flag(false); // reduced_tx_set = 0
-    // global_motion / film_grain — nothing
+                        // global_motion / film_grain — nothing
 }
 
 /// The byte-aligned frame header (for verification / standalone inspection).
@@ -183,7 +183,18 @@ mod tests {
 
     #[test]
     fn uleb128_roundtrip() {
-        let cases = [0u64, 1, 127, 128, 255, 256, 16383, 16384, 1 << 20, u32::MAX as u64];
+        let cases = [
+            0u64,
+            1,
+            127,
+            128,
+            255,
+            256,
+            16383,
+            16384,
+            1 << 20,
+            u32::MAX as u64,
+        ];
         for &v in &cases {
             let e = uleb128(v);
             // decode
@@ -212,7 +223,11 @@ mod tests {
         //   -frames:v 1 -c:v libaom-av1 -still-picture 1 ref.obu
         // First OBUs: 12 00 | 0a 06 18 15 7f fd a0 08
         let expected = vec![0x0a, 0x06, 0x18, 0x15, 0x7f, 0xfd, 0xa0, 0x08];
-        assert_eq!(sequence_header_obu(64, 64), expected, "seq header must match libaom byte-for-byte");
+        assert_eq!(
+            sequence_header_obu(64, 64),
+            expected,
+            "seq header must match libaom byte-for-byte"
+        );
     }
 
     #[test]
@@ -220,7 +235,11 @@ mod tests {
         // Reference: bytes 0..7 of the OBU_FRAME payload from the same libaom
         // still-picture (after `32 09`): 18 00 00 00 50 00 00, then tile data.
         let expected = vec![0x18, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00];
-        assert_eq!(frame_header_bytes(64, 64, 128), expected, "frame header must match libaom");
+        assert_eq!(
+            frame_header_bytes(64, 64, 128),
+            expected,
+            "frame header must match libaom"
+        );
     }
 
     #[test]

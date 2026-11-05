@@ -1,0 +1,86 @@
+name: Release
+
+# Runs only for version tags (v*). A tag is created by a maintainer; this workflow never
+# creates tags itself. It builds the transcode CLI for Linux x86_64, signs the artifact
+# with Sigstore (keyless, via GitHub OIDC), and attaches SLSA build provenance.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and publish release assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # cosign keyless signing and artifact attestations
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master as of 2026-11-04
+        with:
+          toolchain: "1.89.0"
+      - name: Install ffmpeg (test oracle)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Test before packaging
+        run: cargo test --locked --release --no-fail-fast
+      - name: Check tag matches package version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          PACKAGE_VERSION=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)
+          test "v${PACKAGE_VERSION}" = "${TAG_NAME}"
+      - name: Build
+        run: cargo build --release --locked --bin transcode
+      - name: Package assets
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          cp target/release/transcode dist/transcode-linux-x86_64
+          cp LICENSE README.md dist/
+          tar -czf "dist/transcode-${TAG_NAME}-linux-x86_64.tar.gz" -C dist transcode-linux-x86_64 LICENSE README.md
+          (cd dist && sha256sum "transcode-${TAG_NAME}-linux-x86_64.tar.gz" > SHA256SUMS)
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign release artifacts (keyless Sigstore bundles)
+        run: |
+          cd dist
+          for f in "transcode-${TAG_NAME}-linux-x86_64.tar.gz" SHA256SUMS; do
+            cosign sign-blob --yes --bundle "${f}.sigstore.json" "$f"
+          done
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+      - name: Generate SLSA build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "dist/transcode-*-linux-x86_64.tar.gz"
+      - name: Copy provenance bundle to the release assets
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          test -s "$BUNDLE_PATH"
+          cp "$BUNDLE_PATH" "dist/transcode-${TAG_NAME}-linux-x86_64.tar.gz.intoto.jsonl"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          cd dist
+          gh release create "$TAG_NAME" \
+            "transcode-${TAG_NAME}-linux-x86_64.tar.gz" \
+            "transcode-${TAG_NAME}-linux-x86_64.tar.gz.sigstore.json" \
+            "transcode-${TAG_NAME}-linux-x86_64.tar.gz.intoto.jsonl" \
+            SHA256SUMS SHA256SUMS.sigstore.json \
+            --generate-notes

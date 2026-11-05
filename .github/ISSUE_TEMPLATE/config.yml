@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/webfold-ai/transcode/security/advisories/new
+    about: Please use private reporting for vulnerabilities. Do not open a public issue.

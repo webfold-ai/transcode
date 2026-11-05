@@ -24,7 +24,11 @@ struct BitWriter {
 }
 impl BitWriter {
     fn new() -> Self {
-        BitWriter { buf: Vec::new(), cur: 0, nbits: 0 }
+        BitWriter {
+            buf: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
     }
     fn bit(&mut self, b: u32) {
         self.cur = (self.cur << 1) | ((b & 1) as u8);
@@ -116,7 +120,11 @@ fn choose_k(u: &[u64]) -> u32 {
         return 0;
     }
     let mean = (u.iter().map(|&x| x as u128).sum::<u128>() / u.len() as u128) as u64;
-    let k = if mean == 0 { 0 } else { 63 - mean.leading_zeros() };
+    let k = if mean == 0 {
+        0
+    } else {
+        63 - mean.leading_zeros()
+    };
     k.min(30)
 }
 
@@ -180,7 +188,11 @@ fn decode_residuals(br: &mut BitReader, n: usize) -> Vec<u64> {
     let psize = n / parts;
     let mut out = Vec::with_capacity(n);
     for p in 0..parts {
-        let cnt = if p == parts - 1 { n - psize * (parts - 1) } else { psize };
+        let cnt = if p == parts - 1 {
+            n - psize * (parts - 1)
+        } else {
+            psize
+        };
         let k = br.bits(5) as u32;
         for _ in 0..cnt {
             out.push(rice_decode(br, k));
@@ -197,7 +209,11 @@ fn autocorr(x: &[i32], lag: usize) -> Vec<f64> {
         .iter()
         .enumerate()
         .map(|(i, &xi)| {
-            let t = if half > 0.0 { (i as f64 - half) / half } else { 0.0 };
+            let t = if half > 0.0 {
+                (i as f64 - half) / half
+            } else {
+                0.0
+            };
             xi as f64 * (1.0 - t * t)
         })
         .collect();
@@ -269,10 +285,19 @@ fn encode_block(bw: &mut BitWriter, x: &[i32]) {
         // tiny block → order-1 delta fallback (lpc_closed_form, a = 1)
         bw.bits(0, 6);
         let mut prev = 0i64;
-        let u: Vec<u64> = x.iter().map(|&xi| { let e = xi as i64 - prev; prev = xi as i64; zigzag(e) }).collect();
+        let u: Vec<u64> = x
+            .iter()
+            .map(|&xi| {
+                let e = xi as i64 - prev;
+                prev = xi as i64;
+                zigzag(e)
+            })
+            .collect();
         let k = choose_k(&u);
         bw.bits(k as u64, 5);
-        for uu in u { rice_encode(bw, uu, k); }
+        for uu in u {
+            rice_encode(bw, uu, k);
+        }
         return;
     }
     let order = max_o; // = LPC_ORDER (12) for normal blocks; closed-form Levinson
@@ -291,7 +316,9 @@ fn encode_block(bw: &mut BitWriter, x: &[i32]) {
                 x[nn] as i64
             } else {
                 let mut p = 0i64;
-                for i in 0..order { p += q[i] as i64 * x[nn - 1 - i] as i64; }
+                for i in 0..order {
+                    p += q[i] as i64 * x[nn - 1 - i] as i64;
+                }
                 x[nn] as i64 - (p >> shift)
             };
             zigzag(e)
@@ -306,7 +333,12 @@ fn decode_block(br: &mut BitReader, bs: usize) -> Vec<i32> {
         let k = br.bits(5) as u32;
         let mut prev = 0i64;
         let mut out = Vec::with_capacity(bs);
-        for _ in 0..bs { let e = unzigzag(rice_decode(br, k)); let x = prev + e; out.push(x as i32); prev = x; }
+        for _ in 0..bs {
+            let e = unzigzag(rice_decode(br, k));
+            let x = prev + e;
+            out.push(x as i32);
+            prev = x;
+        }
         return out;
     }
     let shift = br.bits(4) as i64;
@@ -319,7 +351,9 @@ fn decode_block(br: &mut BitReader, bs: usize) -> Vec<i32> {
             out.push(e as i32);
         } else {
             let mut p = 0i64;
-            for i in 0..order { p += q[i] * out[nn - 1 - i] as i64; }
+            for i in 0..order {
+                p += q[i] * out[nn - 1 - i] as i64;
+            }
             out.push(((p >> shift) + e) as i32); // lpc_closed_form, order p
         }
     }
@@ -372,7 +406,10 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u8), String> {
     let ch = channels.max(1) as usize;
 
     let mut br = BitReader::new(&data[16..]);
-    let mut chans: Vec<Vec<i32>> = vec![Vec::with_capacity(frames); ch];
+    // Capacity only: a header frame count larger than the input can hold must not drive an
+    // allocation. The vectors still grow on demand, so valid output is unchanged.
+    let cap = frames.min(data.len().saturating_mul(8));
+    let mut chans: Vec<Vec<i32>> = vec![Vec::with_capacity(cap); ch];
     let mut got = 0;
     while got < frames {
         if br.bits(8) != SYNC {
@@ -383,6 +420,11 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u8), String> {
             return Err("bad blocksize".into());
         }
         for c in 0..ch {
+            // Every block consumes at least one bit per sample, so a block that starts at the end of
+            // the input is truncated. Stop before decoding it; valid streams never hit this.
+            if br.pos >= br.buf.len() * 8 {
+                return Err("SLAC: truncated frame".into());
+            }
             chans[c].extend_from_slice(&decode_block(&mut br, bs));
         }
         got += bs;
@@ -402,7 +444,8 @@ pub fn selftest() -> i32 {
         for i in 0..n {
             for c in 0..ch {
                 let t = i as f64 / 16000.0;
-                let v = 8000.0 * (2.0 * std::f64::consts::PI * (300.0 + 120.0 * c as f64) * t).sin();
+                let v =
+                    8000.0 * (2.0 * std::f64::consts::PI * (300.0 + 120.0 * c as f64) * t).sin();
                 samples.push((v as i32) << 16); // canonical full-scale (16-bit source)
             }
         }

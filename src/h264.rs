@@ -37,7 +37,11 @@ struct BitWriter {
 
 impl BitWriter {
     fn new() -> Self {
-        BitWriter { buf: Vec::new(), cur: 0, nbits: 0 }
+        BitWriter {
+            buf: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
     }
     fn put_bit(&mut self, b: u32) {
         self.cur = (self.cur << 1) | ((b & 1) as u8);
@@ -60,7 +64,7 @@ impl BitWriter {
     fn ue(&mut self, v: u32) {
         let code = v + 1;
         let nbits = 32 - code.leading_zeros(); // # of significant bits
-        // (nbits - 1) leading zeros, then `code` in nbits bits
+                                               // (nbits - 1) leading zeros, then `code` in nbits bits
         for _ in 0..(nbits - 1) {
             self.put_bit(0);
         }
@@ -219,7 +223,7 @@ fn build_sps(width: u32, height: u32) -> Vec<u8> {
     w.put_bits(0, 8); // constraint_set flags + reserved
     w.put_bits(30, 8); // level_idc = 3.0
     w.ue(0); // seq_parameter_set_id
-    // (baseline: no chroma_format_idc / bit_depth fields)
+             // (baseline: no chroma_format_idc / bit_depth fields)
     w.ue(0); // log2_max_frame_num_minus4  → frame_num is 4 bits
     w.ue(0); // pic_order_cnt_type = 0
     w.ue(0); // log2_max_pic_order_cnt_lsb_minus4 → poc_lsb is 4 bits
@@ -229,7 +233,7 @@ fn build_sps(width: u32, height: u32) -> Vec<u8> {
     w.ue(mbh - 1); // pic_height_in_map_units_minus1
     w.put_flag(true); // frame_mbs_only_flag
     w.put_flag(false); // direct_8x8_inference_flag
-    // frame cropping for non-multiple-of-16 dimensions (4:2:0 → CropUnit 2×2)
+                       // frame cropping for non-multiple-of-16 dimensions (4:2:0 → CropUnit 2×2)
     let crop_r = (mbw * 16 - width) / 2;
     let crop_b = (mbh * 16 - height) / 2;
     if crop_r != 0 || crop_b != 0 {
@@ -328,7 +332,7 @@ fn build_idr_slice(width: u32, height: u32, rgba: &[u8], idr_id: u32) -> Vec<u8>
     bw.put_bits(0, 4); // frame_num (4 bits; IDR → 0)
     bw.ue(idr_id); // idr_pic_id
     bw.put_bits(0, 4); // pic_order_cnt_lsb (4 bits)
-    // dec_ref_pic_marking (IDR): no_output_of_prior_pics_flag, long_term_reference_flag
+                       // dec_ref_pic_marking (IDR): no_output_of_prior_pics_flag, long_term_reference_flag
     bw.put_flag(false);
     bw.put_flag(false);
     bw.se(0); // slice_qp_delta (QP=26; irrelevant for I_PCM)
@@ -338,7 +342,7 @@ fn build_idr_slice(width: u32, height: u32, rgba: &[u8], idr_id: u32) -> Vec<u8>
         for mbx in 0..mbw {
             bw.ue(25); // mb_type = I_PCM
             bw.align_zero(); // pcm_alignment_zero_bit(s)
-            // luma 16×16
+                             // luma 16×16
             for j in 0..16 {
                 for i in 0..16 {
                     bw.put_byte(yp[(mby * 16 + j) * pw + (mbx * 16 + i)]);
@@ -373,11 +377,7 @@ pub fn encode_frame(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Str
 /// Encode a sequence of RGBA8 frames as a **compressed** intra-only (all-IDR)
 /// H.264 Annex-B stream at [`DEFAULT_QP`], using the adaptive per-MB
 /// I_16x16/I_4x4 encoder. `frames[i]` is `width*height*4` bytes.
-pub fn encode_sequence(
-    frames: &[Vec<u8>],
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
+pub fn encode_sequence(frames: &[Vec<u8>], width: u32, height: u32) -> Result<Vec<u8>, String> {
     encode_sequence_qp(frames, width, height, DEFAULT_QP)
 }
 
@@ -391,7 +391,8 @@ pub fn encode_sequence_qp(
     if width == 0 || height == 0 {
         return Err("H264: zero dimension".into());
     }
-    crate::h264_intra::encode_sequence_adaptive_with_recon(frames, width, height, qp).map(|(s, _)| s)
+    crate::h264_intra::encode_sequence_adaptive_with_recon(frames, width, height, qp)
+        .map(|(s, _)| s)
 }
 
 /// Lossless I_PCM Annex-B stream (every MB stored raw). Exactly reconstructs
@@ -448,10 +449,7 @@ mod tests {
         let frame = vec![128u8; (w * h * 4) as usize];
         let stream = encode_frame(w, h, &frame).expect("encode");
         // count start codes 00 00 00 01
-        let starts = stream
-            .windows(4)
-            .filter(|x| *x == [0, 0, 0, 1])
-            .count();
+        let starts = stream.windows(4).filter(|x| *x == [0, 0, 0, 1]).count();
         assert_eq!(starts, 3, "expected SPS+PPS+IDR start codes");
         // first NAL after start code is SPS (type 7)
         assert_eq!(stream[4] & 0x1F, 7);

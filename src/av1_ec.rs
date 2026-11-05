@@ -83,7 +83,12 @@ impl Default for Writer {
 
 impl Writer {
     pub fn new() -> Self {
-        Writer { low: 0, rng: 0x8000, cnt: -9, precarry: Vec::new() }
+        Writer {
+            low: 0,
+            rng: 0x8000,
+            cnt: -9,
+            precarry: Vec::new(),
+        }
     }
 
     /// Range split from the icdf boundaries `fl` (high) and `fh` (low) with
@@ -229,7 +234,13 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        let mut r = Reader { dif: 0, rng: 0x8000, cnt: -15, data, pos: 0 };
+        let mut r = Reader {
+            dif: 0,
+            rng: 0x8000,
+            cnt: -15,
+            data,
+            pos: 0,
+        };
         r.refill();
         r
     }
@@ -297,7 +308,9 @@ impl<'a> Reader<'a> {
         let vw = (v as u64) << (EC_WIN_SIZE - 16);
         let ret = (dif >= vw) as u32;
         dif -= ret as u64 * vw;
-        v += ret * (r - 2 * v);
+        // dav1d relies on 32-bit wrap-around here (`r - 2*v` is negative when v > r/2 and
+        // ret is 0 or 1); spell the wrap out so debug builds match release.
+        v = v.wrapping_add(ret.wrapping_mul(r.wrapping_sub(v.wrapping_mul(2))));
         self.norm(dif, v);
         ret == 0
     }
@@ -330,7 +343,9 @@ impl<'a> Reader<'a> {
         let vw = (v as u64) << (EC_WIN_SIZE - 16);
         let ret = (dif >= vw) as u32;
         dif -= ret as u64 * vw;
-        v += ret * (r - 2 * v);
+        // dav1d relies on 32-bit wrap-around here (`r - 2*v` is negative when v > r/2 and
+        // ret is 0 or 1); spell the wrap out so debug builds match release.
+        v = v.wrapping_add(ret.wrapping_mul(r.wrapping_sub(v.wrapping_mul(2))));
         self.norm(dif, v);
         (ret == 0) as u32
     }
@@ -428,7 +443,9 @@ mod tests {
         let mut w = Writer::new();
         let mut enc_cdfs: std::collections::HashMap<usize, Vec<u16>> = Default::default();
         for &(nsymbs, s) in &plan {
-            let cdf = enc_cdfs.entry(nsymbs).or_insert_with(|| uniform_cdf(nsymbs));
+            let cdf = enc_cdfs
+                .entry(nsymbs)
+                .or_insert_with(|| uniform_cdf(nsymbs));
             w.symbol(s, cdf, nsymbs);
         }
         let bytes = w.finish();
@@ -436,14 +453,19 @@ mod tests {
         let mut r = Reader::new(&bytes);
         let mut dec_cdfs: std::collections::HashMap<usize, Vec<u16>> = Default::default();
         for (i, &(nsymbs, s)) in plan.iter().enumerate() {
-            let cdf = dec_cdfs.entry(nsymbs).or_insert_with(|| uniform_cdf(nsymbs));
+            let cdf = dec_cdfs
+                .entry(nsymbs)
+                .or_insert_with(|| uniform_cdf(nsymbs));
             let got = r.symbol(cdf, nsymbs);
             assert_eq!(got, s, "symbol {i} mismatch (nsymbs={nsymbs})");
         }
         assert_eq!(enc_cdfs, dec_cdfs, "CDF adaptation diverged enc vs dec");
 
         let bits = bytes.len() as f64 * 8.0 / n as f64;
-        eprintln!("AV1 od_ec⇄msac: {n} symbols → {} bytes ({bits:.2} bits/sym)", bytes.len());
+        eprintln!(
+            "AV1 od_ec⇄msac: {n} symbols → {} bytes ({bits:.2} bits/sym)",
+            bytes.len()
+        );
     }
 
     #[test]
@@ -467,7 +489,10 @@ mod tests {
         }
         let bps = bytes.len() as f64 * 8.0 / bits.len() as f64;
         eprintln!("AV1 bool coder: 90/10 skew → {bps:.3} bits/sym (entropy ≈ 0.47)");
-        assert!(bps < 0.7, "skewed bool stream should compress below 0.7 bits/sym, got {bps}");
+        assert!(
+            bps < 0.7,
+            "skewed bool stream should compress below 0.7 bits/sym, got {bps}"
+        );
     }
 
     #[test]

@@ -40,7 +40,11 @@ fn crc32_table() -> [u32; 256] {
         let mut c = n as u32;
         let mut k = 0;
         while k < 8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
             k += 1;
         }
         t[n] = c;
@@ -91,7 +95,12 @@ struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        BitReader { data, pos: 0, acc: 0, nbits: 0 }
+        BitReader {
+            data,
+            pos: 0,
+            acc: 0,
+            nbits: 0,
+        }
     }
     /// Read `n` bits, LSB-first (DEFLATE convention). `n` ≤ 16 in practice.
     fn bits(&mut self, n: u32) -> Result<u32, String> {
@@ -358,7 +367,11 @@ struct BitWriter {
 
 impl BitWriter {
     fn new() -> Self {
-        BitWriter { buf: Vec::new(), acc: 0, nbits: 0 }
+        BitWriter {
+            buf: Vec::new(),
+            acc: 0,
+            nbits: 0,
+        }
     }
     /// Write `n` bits LSB-first.
     fn bits(&mut self, val: u32, n: u32) {
@@ -786,7 +799,11 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
         }
     }
 
-    Ok(Image { width, height, pixels })
+    Ok(Image {
+        width,
+        height,
+        pixels,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -906,7 +923,9 @@ mod tests {
 
     #[test]
     fn zlib_roundtrips_itself() {
-        let data: Vec<u8> = (0..20000u32).map(|i| ((i * 7 + i / 13) % 256) as u8).collect();
+        let data: Vec<u8> = (0..20000u32)
+            .map(|i| ((i * 7 + i / 13) % 256) as u8)
+            .collect();
         let z = zlib_compress(&data);
         let back = zlib_decompress(&z).expect("zlib roundtrip");
         assert_eq!(back, data);
