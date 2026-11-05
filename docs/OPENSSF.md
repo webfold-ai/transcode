@@ -48,7 +48,7 @@ been created or recorded here.
 
 1. **CODEOWNERS.** Resolved. `.github/CODEOWNERS` lists `@twn-lloyd @yokoszn`, two human owners,
    as the owners instructed. The ruleset still needs applying (item 6). No bot accounts are listed.
-2. **Patents and licensing.** Resolved as a disclosure. The maintainers chose to publish under Apache-2.0 with no patent search or counsel review, and the README states that. The patent and licence position of each format is listed in the README and in docs/STANDARDS.md. Users are responsible for checking the position that applies to them.
+2. **Patents and licensing.** Resolved. The code is Apache-2.0, all modules are published, and the README and docs/STANDARDS.md state the patent position of each format and that the licence grants no rights under third-party patents.
 3. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists
    hello@twn.systems, alongside GitHub private reporting.
 5. **Visibility.** The repository is private. Scorecard publishing, the badges and
