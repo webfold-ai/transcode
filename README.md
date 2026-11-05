@@ -13,7 +13,9 @@ the tests check.
 
 ## Patents and licensing
 
-This section must be read before the crate is distributed. It is not resolved. Several formats in this crate are covered by patents in some jurisdictions. H.264 and AAC are the main examples, and both are licensed through patent pools. MP3 patents have largely expired, but the position varies by country. The MP4, MKV and HEIF writers carry H.264 here, so the same questions apply to their output. Container licensing has not been reviewed. AV1 is described by its licensors as royalty-free under published terms. That is not the same as a statement that no patent applies. Nothing in this repository is a patent search, a licensing opinion, or a grant of patent rights. Do not describe the crate as patent-free. Maintainers need to decide, with counsel, whether and how these codecs are published. That decision is tracked as an open item in docs/OPENSSF.md.
+The source is published under the Apache License, Version 2.0 (see [License](#license)). No patent search, licensing opinion or counsel review has been carried out for the formats in this crate. Several of them are covered by patents in some jurisdictions. H.264 and AAC are the main examples, and both are licensed through patent pools; royalties can apply. MP3 patents have largely expired, but the position varies by country. The MP4, MKV and HEIF writers carry H.264, so the same applies to their output. Container licensing has not been reviewed. AV1 is described by its licensors as royalty-free under published terms, which is not the same as a statement that no patent applies.
+
+This repository grants no patent rights beyond those in the Apache License, Version 2.0, and that licence covers only patents held by contributors in respect of their own contributions. Anyone who distributes or uses an encoder or decoder for these formats is responsible for checking the patent and licence position that applies to them. The crate makes no claim that it is free of patent encumbrance.
 
 ## What works today
 
