@@ -67,4 +67,4 @@ Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 ## License
 
 By contributing you agree that your contribution is licensed under the same terms as the
-project (MIT; see [LICENSE-MIT](LICENSE-MIT)).
+project (Apache-2.0; see [LICENSE](LICENSE)).

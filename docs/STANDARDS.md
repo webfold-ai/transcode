@@ -46,12 +46,11 @@ source has been read.
 Two formats named in the repository description are **not implemented** in this source tree:
 NIfTI and HDF5. This page does not cover them. Do not cite them as supported.
 
-## What the MIT licence covers
+## What the licence covers
 
-The crate's own code is licensed under the MIT licence (`LICENSE-MIT`, `license = "MIT"` in
-`Cargo.toml`). That licence covers this code only. It grants no rights under any patent that
-applies to a format above. A dual `MIT OR Apache-2.0` licence has been discussed but is not in the
-repository; that is an owners' decision.
+The crate's own code is licensed under the Apache License, Version 2.0 (`LICENSE`,
+`license = "Apache-2.0"` in `Cargo.toml`). That licence covers this code only. It grants no rights
+under any patent that applies to a format above.
 
 ## Decisions for the owners
 
@@ -60,5 +59,4 @@ repository; that is an owners' decision.
    crate as patent-free.
 2. **MP3 and JPEG.** Confirm the expiry dates and jurisdictions with counsel.
 3. **Verification of every row.** Read each primary source above and mark the "Verified" column.
-4. **Licence.** MIT only, or dual MIT and Apache-2.0 with a `LICENSE-APACHE` file.
-5. **Publication.** Whether to publish any encoder that writes H.264 or AAC at all.
+4. **Publication.** Whether to publish any encoder that writes H.264 or AAC at all.

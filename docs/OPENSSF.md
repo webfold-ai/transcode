@@ -20,7 +20,7 @@ that a score has been earned.
 | Dependency-Update-Tool | `dependabot.yml` for cargo and github-actions, weekly | In repo |
 | Token-Permissions | Read-only top-level `permissions` in every workflow; write only per job | In repo |
 | Security-Policy | `SECURITY.md` | In repo |
-| License | `LICENSE-MIT` matches `license = "MIT"` in Cargo.toml | In repo; licensing decision open (see the README) |
+| License | `LICENSE` (Apache-2.0) matches `license = "Apache-2.0"` in Cargo.toml | In repo |
 | Binary-Artifacts | No binaries are committed. The crate has no build scripts. | Verified by inspection |
 | Dangerous-Workflow | No `pull_request_target`; untrusted input is not interpolated into `run:` steps | In repo |
 | Vulnerabilities | `cargo audit` and `cargo deny` in `supply-chain.yml`. Last local run: no advisories | In repo; Verified locally |
@@ -48,9 +48,7 @@ been created or recorded here.
 
 1. **CODEOWNERS.** Resolved. `.github/CODEOWNERS` lists `@twn-lloyd @yokoszn`, two human owners,
    as the owners instructed. The ruleset still needs applying (item 6). No bot accounts are listed.
-2. **Licensing.** Cargo.toml and `LICENSE-MIT` say MIT. An earlier README said `MIT OR Apache-2.0`.
-   Decide, and if dual licensing is wanted, add `LICENSE-APACHE` and change Cargo.toml. **Human**
-3. **Patents and standards.** The per-format position is in docs/STANDARDS.md. Every row is still
+2. **Patents and standards.** The per-format position is in docs/STANDARDS.md. Every row is still
    unverified against its primary source, and H.264, AAC, MP3 and the containers that carry them
    need counsel's review before publication. **Human**
 4. **Contacts.** Resolved. SECURITY.md lists security@twn.systems and CODE_OF_CONDUCT.md lists

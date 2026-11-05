@@ -66,7 +66,7 @@ current when the pin was set. Update it on the same schedule as the others.
 Releases are produced only by `release.yml`, which runs when a `v*` tag is pushed. A release
 contains:
 
-- `transcode-vX.Y.Z-linux-x86_64.tar.gz`, the CLI binary with `LICENSE-MIT` and `README.md`,
+- `transcode-vX.Y.Z-linux-x86_64.tar.gz`, the CLI binary with `LICENSE` and `README.md`,
 - `SHA256SUMS`, with a sha256 for the tarball,
 - `.sigstore.json` bundles from cosign keyless signing (one each for the tarball and `SHA256SUMS`),
   containing the signature, the certificate and the transparency-log proof,

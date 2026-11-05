@@ -137,8 +137,7 @@ an external-decoder check where one exists, and a note on patent status for revi
 
 ## License
 
-MIT. See [LICENSE-MIT](LICENSE-MIT).
+Apache License, Version 2.0. See [LICENSE](LICENSE).
 
-The repository contains only the MIT license text. An earlier version of this README also said
-"MIT OR Apache-2.0"; that is not reflected in the repository and is part of the open licensing
-decision above.
+The licence covers this code only. It grants no rights under any patent that applies to a format
+this crate decodes or encodes; see the patent note above.
