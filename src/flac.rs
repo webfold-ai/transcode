@@ -423,7 +423,12 @@ impl<'a> R<'a> {
     }
     fn unary(&mut self) -> u32 {
         let mut q = 0u32;
+        // Past the end of the input the reader yields zeros forever. Stop once the read position
+        // is past the end, so a truncated stream cannot loop; the caller's sync checks reject it.
         while self.bit() == 0 {
+            if self.pos > self.d.len() * 8 {
+                break;
+            }
             q += 1;
         }
         q
@@ -482,10 +487,17 @@ fn decode_residual(r: &mut R, blocksize: usize, order: usize) -> Vec<i64> {
     res
 }
 
-fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Vec<i64> {
+fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Result<Vec<i64>, String> {
     let _pad = r.bit();
     let typ = r.bits(6);
-    let wasted = if r.bit() == 1 { r.unary() + 1 } else { 0 };
+    let wasted = if r.bit() == 1 {
+        r.unary().saturating_add(1)
+    } else {
+        0
+    };
+    if wasted >= bps {
+        return Err("FLAC: wasted bits exceed sample width".into());
+    }
     let b = bps - wasted;
     let mut s: Vec<i64> = if typ == 0 {
         vec![r.sbits(b); blocksize]
@@ -531,7 +543,7 @@ fn decode_subframe(r: &mut R, blocksize: usize, bps: u32) -> Vec<i64> {
             *v <<= wasted;
         }
     }
-    s
+    Ok(s)
 }
 
 /// Decode a real FLAC stream → (native samples interleaved, rate, channels, bps).
@@ -634,7 +646,7 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
                 } // mid/side
                 _ => 0,
             };
-            sub.push(decode_subframe(&mut r, bs, bps + side_bonus));
+            sub.push(decode_subframe(&mut r, bs, bps + side_bonus)?);
         }
         r.align();
         r.bits(16); // CRC-16
@@ -666,6 +678,9 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u32), String> {
             }
             _ => sub,
         };
+        if frame.len() != ch {
+            return Err("FLAC: frame channel count differs from STREAMINFO".into());
+        }
         for c in 0..ch {
             chans[c].extend_from_slice(&frame[c]);
         }

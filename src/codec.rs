@@ -420,6 +420,11 @@ pub fn decode(data: &[u8]) -> Result<(Vec<i32>, u32, u16, u8), String> {
             return Err("bad blocksize".into());
         }
         for c in 0..ch {
+            // Every block consumes at least one bit per sample, so a block that starts at the end of
+            // the input is truncated. Stop before decoding it; valid streams never hit this.
+            if br.pos >= br.buf.len() * 8 {
+                return Err("SLAC: truncated frame".into());
+            }
             chans[c].extend_from_slice(&decode_block(&mut br, bs));
         }
         got += bs;

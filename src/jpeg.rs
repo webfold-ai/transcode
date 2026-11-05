@@ -543,11 +543,22 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
         if p + 2 > data.len() {
             return Err("JPEG: truncated marker".into());
         }
+        // Every marker except the standalone ones carries a 2-byte length that counts itself.
+        // The segment must have room for that length and lie inside the input before any field is read.
+        if !matches!(marker, 0x01 | 0xD0..=0xD9) {
+            let seg = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
+            if seg < 2 || p + seg > data.len() {
+                return Err("JPEG: segment length outside the input".into());
+            }
+        }
         match marker {
             0xD9 => return Err("JPEG: EOI before scan".into()),
             0xC0 | 0xC1 => {
                 // SOF0 baseline / SOF1 extended sequential (treat same)
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
+                if len < 7 {
+                    return Err("JPEG: frame header too short".into());
+                }
                 let prec = data[p + 2];
                 if prec != 8 {
                     return Err("JPEG: only 8-bit precision".into());
@@ -603,6 +614,9 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                         return Err("JPEG: bad Huffman table id".into());
                     } // index is 0..3
                     q += 1;
+                    if q + 16 > end {
+                        return Err("JPEG: truncated DHT counts".into());
+                    }
                     let mut bits = [0u8; 16];
                     let mut total = 0usize;
                     for b in &mut bits {
@@ -642,6 +656,10 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
                     q += 1;
                     let mut table = [0u16; 64];
                     for k in 0..64 {
+                        let need = if prec == 0 { 1 } else { 2 };
+                        if q + need > end {
+                            return Err("JPEG: truncated DQT".into());
+                        }
                         if prec == 0 {
                             table[ZIGZAG[k]] = data[q] as u16;
                             q += 1;
@@ -656,13 +674,22 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
             }
             0xDD => {
                 // DRI
+                if p + 4 > data.len() {
+                    return Err("JPEG: truncated restart interval".into());
+                }
                 restart_interval = u16::from_be_bytes([data[p + 2], data[p + 3]]) as usize;
                 p += 4;
             }
             0xDA => {
                 // SOS
                 let len = u16::from_be_bytes([data[p], data[p + 1]]) as usize;
-                let ns = data[p + 2] as usize;
+                let ns = *data
+                    .get(p + 2)
+                    .ok_or_else(|| "JPEG: truncated scan header".to_string())?
+                    as usize;
+                if 3 + 2 * ns > len {
+                    return Err("JPEG: scan header too short for its component count".into());
+                }
                 for i in 0..ns {
                     let cs = data[p + 3 + i * 2];
                     let tdta = data[p + 4 + i * 2];
@@ -724,6 +751,11 @@ fn decode_scan(
     adobe: Option<u8>,
     basis: &[[f32; 8]; 8],
 ) -> Result<Image, String> {
+    // Only the grey (1), YCbCr (3) and CMYK (4) paths exist. Any other count, including a scan
+    // before any frame header, would index past the component list.
+    if !matches!(comps.len(), 1 | 3 | 4) {
+        return Err("JPEG: unsupported component count".into());
+    }
     let hmax = comps.iter().map(|c| c.h).max().unwrap_or(1) as usize;
     let vmax = comps.iter().map(|c| c.v).max().unwrap_or(1) as usize;
     let mcus_x = (width + 8 * hmax - 1) / (8 * hmax);
