@@ -45,7 +45,7 @@ in public spaces.
 ## Enforcement
 
 Report instances of abusive, harassing or otherwise unacceptable behaviour to the project maintainers.
-Report conduct concerns to **hello@twn.systems**, or through GitHub's private reporting for this
+Report conduct concerns to **hello@webfold.ai**, or through GitHub's private reporting for this
 repository (**https://github.com/webfold-ai/transcode/security/advisories/new**) and state in the
 report that it concerns conduct. All complaints are reviewed promptly and fairly, and the reporter's privacy and
 security are respected.
