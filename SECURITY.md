@@ -16,7 +16,7 @@ Please report security issues privately, using GitHub's private vulnerability re
 
 **https://github.com/webfold-ai/transcode/security/advisories/new**
 
-You can also email **security@twn.systems**. Do not open a public issue, pull request or
+You can also email **security@webfold.ai**. Do not open a public issue, pull request or
 discussion for a suspected vulnerability.
 
 Include, where you can:
